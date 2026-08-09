@@ -242,7 +242,6 @@
     "delete": "Delete",
     "copyPath": "Copy Path",
     "showInExplorer": "Show in Explorer",
-    "openPreview": "Open Preview",
     "newFileTitle": "New File",
     "newFolderTitle": "New Folder",
     "fileNamePlaceholder": "Enter file name (with extension)",
@@ -690,7 +689,8 @@
     "loadingPdf": "Loading PDF...",
     "zoomIn": "Zoom In",
     "zoomOut": "Zoom Out",
-    "zoomReset": "Reset zoom (default 100%)"
+    "zoomReset": "Reset zoom (default 100%)",
+    "rowsTruncated": "Table is too large, only the first {{count}} rows are shown"
   },
   "update": {
     "later": "Remind Later",

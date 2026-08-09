@@ -103,6 +103,10 @@ function ContentRenderer({ content, fileType, pdfBase64Data, imageSrc, title, ba
 
   // Markdown 渲染
   if (normalizedType === "md" || normalizedType === "markdown") {
+    // 大体积 Markdown：跳过完整渲染，切换为轻量虚拟滚动纯文本预览，避免界面卡死
+    if (isOversizedText(content)) {
+      return <VirtualizedCodePreview content={content} />;
+    }
     return (
       <div className="px-10 py-8">
         <MarkdownPreview content={content} baseDir={baseDir} onOpenLink={onOpenLink} />
@@ -389,7 +393,181 @@ function SourceCodeBlock({
   );
 }
 
+/* ===== 大文件轻量预览（虚拟滚动） ===== */
+// 行高常量：必须与下方样式中行号的 line-height 完全一致（13px 字体，取整数 21px），
+// 否则滚动平移与内容行高不一致，滚动距离较大时会出现行号错位
+const VIRTUAL_LINE_HEIGHT = 21;
+// 视口上下额外渲染的行数缓冲，避免快速滚动时出现空白
+const VIRTUAL_OVERSCAN = 25;
+
+/** 文本类预览的富渲染上限：行数或字符数任一超限时，切换为轻量虚拟滚动预览 */
+const RICH_RENDER_MAX_LINES = 800;
+const RICH_RENDER_MAX_CHARS = 100 * 1024;
+
+/**
+ * 判断文本内容是否超过富渲染上限
+ * 大文件若走语法高亮 + 全量 DOM 渲染，会长时间阻塞主线程导致界面卡死
+ */
+function isOversizedText(content: string): boolean {
+  // 字符数超限直接判定为大文件
+  if (content.length > RICH_RENDER_MAX_CHARS) return true;
+  // 统计换行数：超过行数上限也判定为大文件
+  let newlines = 0;
+  for (let i = 0; i < content.length; i++) {
+    if (content.charCodeAt(i) === 10) {
+      newlines++;
+      if (newlines > RICH_RENDER_MAX_LINES) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 大文件源码轻量预览组件
+ * 仅渲染可视区域内的行（虚拟滚动 + 定位平移），不做语法高亮，
+ * 渲染成本与文件总行数无关，从根本上避免大文件预览导致的界面卡死
+ */
+function VirtualizedCodePreview({ content }: { content: string }) {
+  // 按行拆分：O(n) 单次成本，之后仅切片渲染可见区间
+  const lines = useMemo(() => {
+    const arr = content.split("\n");
+    // 末尾换行产生的空行不显示行号
+    if (arr.length > 0 && arr[arr.length - 1] === "") arr.pop();
+    return arr;
+  }, [content]);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // 当前滚动偏移与视口高度，驱动可见行区间计算
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+
+  // 初始化视口高度并监听容器尺寸变化（窗口缩放等场景）
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => setViewportHeight(el.clientHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // 切换预览文件时重置滚动位置，避免新文件继承上一个文件的滚动偏移
+  useEffect(() => {
+    setScrollTop(0);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [content]);
+
+  // 滚动事件：仅更新偏移状态，渲染只涉及可见区间，成本恒定
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    setScrollTop(e.currentTarget.scrollTop);
+  }, []);
+
+  const totalHeight = lines.length * VIRTUAL_LINE_HEIGHT;
+  // 可见行区间（含上下缓冲）
+  const startIndex = Math.max(0, Math.floor(scrollTop / VIRTUAL_LINE_HEIGHT) - VIRTUAL_OVERSCAN);
+  const endIndex = Math.min(lines.length, Math.ceil((scrollTop + viewportHeight) / VIRTUAL_LINE_HEIGHT) + VIRTUAL_OVERSCAN);
+  const visibleLines = lines.slice(startIndex, endIndex);
+
+  return (
+    <div className="cpv-root">
+      <div ref={scrollRef} className="cpv-scroll" onScroll={handleScroll}>
+        {/* 总高度占位：撑起滚动条 */}
+        <div style={{ height: totalHeight, width: 1 }} />
+        {/* 内容层：绝对定位 + 按可见区起点平移，仅渲染可视行 */}
+        <div className="cpv-row" style={{ transform: `translateY(${startIndex * VIRTUAL_LINE_HEIGHT}px)` }}>
+          <div className="cpv-gutter" aria-hidden="true">
+            {visibleLines.map((_, i) => (
+              <span key={startIndex + i}>{startIndex + i + 1}</span>
+            ))}
+          </div>
+          <pre className="cpv-content">
+            <code>{visibleLines.join("\n")}</code>
+          </pre>
+        </div>
+      </div>
+      <style>{virtualCodePreviewStyles}</style>
+    </div>
+  );
+}
+
+// 轻量虚拟滚动预览样式
+const virtualCodePreviewStyles = `
+.cpv-root {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cpv-scroll {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* 行号列底色与分隔线由容器背景模拟，保证随内容全高显示 */
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-sub) 0,
+    var(--color-bg-sub) calc(3.5rem - 1px),
+    var(--color-border-light) calc(3.5rem - 1px),
+    var(--color-border-light) 3.5rem,
+    var(--color-bg-elevated) 3.5rem,
+    var(--color-bg-elevated) 100%
+  );
+}
+.cpv-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+}
+.cpv-gutter {
+  flex-shrink: 0;
+  width: 3.5rem;
+  padding: 14px 0.8rem 14px 0;
+  text-align: right;
+  user-select: none;
+  color: var(--color-text-tertiary);
+}
+.cpv-gutter span {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 21px;
+}
+.cpv-content {
+  flex: 1;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 14px 16px !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  font-family: var(--font-mono) !important;
+  font-size: 13px !important;
+  line-height: 21px !important;
+  white-space: pre !important;
+  tab-size: 4;
+  color: var(--color-text-secondary) !important;
+  background: transparent !important;
+}
+.cpv-content code {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  background: none !important;
+  padding: 0 !important;
+  color: inherit !important;
+}
+`;
+
 function CodePreview({ content, fileType }: { content: string; fileType: string }) {
+  // 行数或体积超限的大文件：切换为轻量虚拟滚动预览，避免语法高亮与海量 DOM 节点卡死界面
+  if (isOversizedText(content)) {
+    return <VirtualizedCodePreview content={content} />;
+  }
   // 已识别的扩展名使用对应的 hljs 语言标识，未识别时以扩展名本身作为标识（无高亮但保持代码样式）
   const language = CODE_LANGUAGES[fileType] ?? fileType;
   const fence = buildFence(content);
@@ -587,6 +765,8 @@ const codePreviewStyles = `
  * 解析 JSON 格式的 Excel 数据并渲染为 HTML 表格
  * 数据格式: { sheets: { Sheet1: { data: [[...], [...]], row_count: N, col_count: M } }, sheet_names: ["Sheet1"] }
  */
+// 表格数据行渲染上限：超大表格只渲染前 N 行，避免一次性渲染海量表格 DOM 导致界面卡死
+const EXCEL_MAX_RENDER_ROWS = 1000;
 function ExcelTableRenderer({ content }: { content: string }) {
   const { t } = useTranslation();
   // 尝试解析 JSON 数据
@@ -646,6 +826,9 @@ function ExcelTableRenderer({ content }: { content: string }) {
         // 第一行作为表头
         const headerRow = rows[0];
         const bodyRows = rows.slice(1);
+        // 超大表格只渲染前 EXCEL_MAX_RENDER_ROWS 行，避免海量表格 DOM 导致界面卡死
+        const truncated = bodyRows.length > EXCEL_MAX_RENDER_ROWS;
+        const displayRows = truncated ? bodyRows.slice(0, EXCEL_MAX_RENDER_ROWS) : bodyRows;
 
         return (
           <div key={sheetName} className="mb-6">
@@ -673,7 +856,7 @@ function ExcelTableRenderer({ content }: { content: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {bodyRows.map((row, rowIdx) => (
+                  {displayRows.map((row, rowIdx) => (
                     <tr
                       key={rowIdx}
                       className={rowIdx % 2 === 1 ? "bg-bg-sub/50" : ""}
@@ -691,6 +874,11 @@ function ExcelTableRenderer({ content }: { content: string }) {
                 </tbody>
               </table>
             </div>
+            {truncated && (
+              <div className="text-[12px] text-text-tertiary mt-2">
+                {t("preview.rowsTruncated", { count: EXCEL_MAX_RENDER_ROWS })}
+              </div>
+            )}
           </div>
         );
       })}

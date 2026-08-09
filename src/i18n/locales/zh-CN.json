@@ -242,7 +242,6 @@
     "delete": "删除",
     "copyPath": "复制路径",
     "showInExplorer": "在资源管理器中显示",
-    "openPreview": "打开预览",
     "newFileTitle": "新建文件",
     "newFolderTitle": "新建文件夹",
     "fileNamePlaceholder": "输入文件名（含扩展名）",
@@ -690,7 +689,8 @@
     "loadingPdf": "加载 PDF 中...",
     "zoomIn": "放大",
     "zoomOut": "缩小",
-    "zoomReset": "重置缩放（默认 100%）"
+    "zoomReset": "重置缩放（默认 100%）",
+    "rowsTruncated": "表格过大，仅显示前 {{count}} 行数据"
   },
   "update": {
     "later": "稍后提醒",

@@ -1007,12 +1007,17 @@ export default function App() {
       }
     } catch (err) {
       console.error("[App] 预览文档失败:", err);
+      // 不支持的文件格式（错误码 3002）：不展示预览页，仅保留右上角 Toast 提示（safeInvoke 已触发）
+      if (parseError(err).code === 3002) {
+        handleClosePreview();
+        return;
+      }
       setPreviewContent(`[${t('preview.previewFailed')}] ${err instanceof Error ? err.message : String(err)}`);
       setPreviewFileType(undefined);
     } finally {
       setPreviewLoading(false);
     }
-  }, [currentWorkspaceId, workspaces]);
+  }, [currentWorkspaceId, workspaces, handleClosePreview]);
 
   // Markdown 相对链接点击：基于当前预览文件目录解析为工作区内绝对路径，再打开预览
   const handleOpenMarkdownLink = useCallback((href: string) => {

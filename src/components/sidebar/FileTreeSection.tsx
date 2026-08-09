@@ -556,19 +556,6 @@ export function FileTreeSection({ onOpenPreview, hideSearchBar }: { onOpenPrevie
     /* 文件菜单 */
     return [
       {
-        label: t('fileTree.openPreview'),
-        icon: "eye",
-        onClick: () => {
-          if (onOpenPreview) {
-            onOpenPreview(node.path, node.name);
-          } else {
-            const { selectNode } = useFileTreeStore.getState();
-            selectNode(node.path);
-          }
-        },
-      },
-      { label: "", separator: true, onClick: () => {} },
-      {
         label: t('fileTree.rename'),
         icon: "edit",
         onClick: () => setRenamingPath(node.path),
@@ -591,7 +578,7 @@ export function FileTreeSection({ onOpenPreview, hideSearchBar }: { onOpenPrevie
         onClick: () => tauriCmd.showInFileManager(activeWorkspaceId, node.path),
       },
     ];
-  }, [contextMenu, activeWorkspaceId, handleCopyPath, onOpenPreview]);
+  }, [contextMenu, activeWorkspaceId, handleCopyPath]);
 
   return (
     <div className="ft-section">
