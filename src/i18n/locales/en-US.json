@@ -121,7 +121,8 @@
     "planMode": "read-only analysis, no modifications",
     "buildMode": "full programming execution",
     "documentMode": "generate and process Word/Excel/PPT/PDF documents",
-    "switchGroup": "Agent Mode Switch"
+    "switchGroup": "Agent Mode Switch",
+    "tabSwitchTip": "Press Tab to quickly switch modes"
   },
   "confirmNode": {
     "userConfirmed": "✓ User confirmed execution",

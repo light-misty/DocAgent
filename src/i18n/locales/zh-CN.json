@@ -121,7 +121,8 @@
     "planMode": "只读分析，不执行修改操作",
     "buildMode": "完整编程执行能力",
     "documentMode": "生成和处理 Word/Excel/PPT/PDF 文档",
-    "switchGroup": "Agent 模式切换"
+    "switchGroup": "Agent 模式切换",
+    "tabSwitchTip": "Tab 键可快速切换模式"
   },
   "confirmNode": {
     "userConfirmed": "✓ 用户已确认执行",

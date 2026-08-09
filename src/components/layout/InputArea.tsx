@@ -1031,6 +1031,7 @@ function ModeSelector({ dropdownUp = false }: { dropdownUp?: boolean }) {
       <div
         role="button"
         aria-label={t('agentMode.switchGroup')}
+        title={t('agentMode.tabSwitchTip')}
         tabIndex={0}
         className={`mode-selector-trigger ${open ? "mode-selector-trigger-active" : ""}`}
         onClick={() => setOpen((prev) => !prev)}
