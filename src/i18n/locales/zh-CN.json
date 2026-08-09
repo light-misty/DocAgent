@@ -689,8 +689,7 @@
     "loadingPdf": "加载 PDF 中...",
     "zoomIn": "放大",
     "zoomOut": "缩小",
-    "zoomReset": "重置缩放（默认 100%）",
-    "rowsTruncated": "表格过大，仅显示前 {{count}} 行数据"
+    "zoomReset": "重置缩放（默认 100%）"
   },
   "update": {
     "later": "稍后提醒",

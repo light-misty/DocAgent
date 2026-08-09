@@ -689,8 +689,7 @@
     "loadingPdf": "Loading PDF...",
     "zoomIn": "Zoom In",
     "zoomOut": "Zoom Out",
-    "zoomReset": "Reset zoom (default 100%)",
-    "rowsTruncated": "Table is too large, only the first {{count}} rows are shown"
+    "zoomReset": "Reset zoom (default 100%)"
   },
   "update": {
     "later": "Remind Later",

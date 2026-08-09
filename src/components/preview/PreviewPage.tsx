@@ -761,12 +761,109 @@ const codePreviewStyles = `
 `;
 
 /**
+ * 虚拟滚动表格组件
+ * 通过首尾空行占位撑起总高度，只渲染可视区域内的行（表头吸顶），
+ * 渲染成本与总行数无关，超大表格可完整浏览而不卡死
+ */
+// 表格行高常量：必须与下方样式中单元格 line-height(19px) + padding(16px) + 边框(1px) 之和一致
+const EXCEL_ROW_HEIGHT = 36;
+// 视口上下额外渲染的行数缓冲，避免快速滚动时出现空白
+const EXCEL_OVERSCAN = 20;
+function VirtualizedTable({ headerRow, rows }: { headerRow: string[]; rows: string[][] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // 当前滚动偏移与视口高度，驱动可见行区间计算
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+
+  // 初始化视口高度并监听容器尺寸变化（窗口缩放等场景）
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => setViewportHeight(el.clientHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // 滚动事件：仅更新偏移状态，渲染只涉及可见区间，成本恒定
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    setScrollTop(e.currentTarget.scrollTop);
+  }, []);
+
+  const totalRows = rows.length;
+  // 可见行区间（含上下缓冲）
+  const startIndex = Math.max(0, Math.floor(scrollTop / EXCEL_ROW_HEIGHT) - EXCEL_OVERSCAN);
+  const endIndex = Math.min(totalRows, Math.ceil((scrollTop + viewportHeight) / EXCEL_ROW_HEIGHT) + EXCEL_OVERSCAN);
+  const visibleRows = rows.slice(startIndex, endIndex);
+
+  return (
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      className="overflow-auto border border-border rounded-[var(--radius-sm)]"
+      style={{ maxHeight: "60vh" }}
+    >
+      <table className="evx-table w-full border-collapse text-[13px]">
+        <thead>
+          <tr>
+            {headerRow.map((cell, colIdx) => (
+              <th
+                key={colIdx}
+                className="px-3 py-2 text-left font-semibold text-text-primary border-b border-border whitespace-nowrap bg-bg-sub"
+              >
+                {cell ?? ""}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {/* 首尾空行占位：撑起表格总高度，DOM 中仅存在可视行 */}
+          <tr style={{ height: startIndex * EXCEL_ROW_HEIGHT }} />
+          {visibleRows.map((row, i) => {
+            const rowIdx = startIndex + i;
+            return (
+              <tr key={rowIdx} className={rowIdx % 2 === 1 ? "bg-bg-sub/50" : ""}>
+                {headerRow.map((_, colIdx) => (
+                  <td
+                    key={colIdx}
+                    className="px-3 py-2 text-text-secondary border-b border-border-light whitespace-nowrap"
+                  >
+                    {row[colIdx] ?? ""}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+          <tr style={{ height: (totalRows - endIndex) * EXCEL_ROW_HEIGHT }} />
+        </tbody>
+      </table>
+      <style>{virtualTableStyles}</style>
+    </div>
+  );
+}
+
+// 虚拟滚动表格样式：固定行高保证占位高度与真实行一致，表头吸顶
+const virtualTableStyles = `
+.evx-table th,
+.evx-table td {
+  line-height: 19px;
+}
+.evx-table tbody tr {
+  height: 36px;
+}
+.evx-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+`;
+
+/**
  * Excel 表格渲染组件
  * 解析 JSON 格式的 Excel 数据并渲染为 HTML 表格
  * 数据格式: { sheets: { Sheet1: { data: [[...], [...]], row_count: N, col_count: M } }, sheet_names: ["Sheet1"] }
  */
-// 表格数据行渲染上限：超大表格只渲染前 N 行，避免一次性渲染海量表格 DOM 导致界面卡死
-const EXCEL_MAX_RENDER_ROWS = 1000;
 function ExcelTableRenderer({ content }: { content: string }) {
   const { t } = useTranslation();
   // 尝试解析 JSON 数据
@@ -826,9 +923,6 @@ function ExcelTableRenderer({ content }: { content: string }) {
         // 第一行作为表头
         const headerRow = rows[0];
         const bodyRows = rows.slice(1);
-        // 超大表格只渲染前 EXCEL_MAX_RENDER_ROWS 行，避免海量表格 DOM 导致界面卡死
-        const truncated = bodyRows.length > EXCEL_MAX_RENDER_ROWS;
-        const displayRows = truncated ? bodyRows.slice(0, EXCEL_MAX_RENDER_ROWS) : bodyRows;
 
         return (
           <div key={sheetName} className="mb-6">
@@ -841,44 +935,8 @@ function ExcelTableRenderer({ content }: { content: string }) {
                 </span>
               </div>
             )}
-            <div className="overflow-x-auto border border-border rounded-[var(--radius-sm)]">
-              <table className="w-full border-collapse text-[13px]">
-                <thead>
-                  <tr className="bg-bg-sub">
-                    {headerRow.map((cell, colIdx) => (
-                      <th
-                        key={colIdx}
-                        className="px-3 py-2 text-left font-semibold text-text-primary border-b border-border whitespace-nowrap"
-                      >
-                        {cell ?? ""}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayRows.map((row, rowIdx) => (
-                    <tr
-                      key={rowIdx}
-                      className={rowIdx % 2 === 1 ? "bg-bg-sub/50" : ""}
-                    >
-                      {headerRow.map((_, colIdx) => (
-                        <td
-                          key={colIdx}
-                          className="px-3 py-2 text-text-secondary border-b border-border-light whitespace-nowrap"
-                        >
-                          {row[colIdx] ?? ""}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {truncated && (
-              <div className="text-[12px] text-text-tertiary mt-2">
-                {t("preview.rowsTruncated", { count: EXCEL_MAX_RENDER_ROWS })}
-              </div>
-            )}
+            {/* 虚拟滚动表格：超大表格也可完整浏览而不卡死 */}
+            <VirtualizedTable headerRow={headerRow} rows={bodyRows} />
           </div>
         );
       })}
