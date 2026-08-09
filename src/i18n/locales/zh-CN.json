@@ -82,7 +82,6 @@
     "undoRollback": "撤销回退",
     "undoingRollback": "恢复中...",
     "undoRollbackFailed": "撤销回退失败，请稍后重试",
-    "snapshotCreated": "文件快照已创建",
     "confirmCreateBranch": "确认创建分支",
     "cancelCreateBranch": "取消",
     "previousBranch": "上一个分支",

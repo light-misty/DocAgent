@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { WorkflowNode, WorkflowNodeType, NodeStatus, ExecutionStatus, NodeDataMap, SubAgentNodeData, UserNodeData, ToolNodeData, ThinkingNodeData, ContentNodeData, SnapshotNodeData } from "../types";
+import type { WorkflowNode, WorkflowNodeType, NodeStatus, ExecutionStatus, NodeDataMap, SubAgentNodeData, UserNodeData, ToolNodeData, ThinkingNodeData, ContentNodeData } from "../types";
 import type { Message, BranchGroupInfo, RevertInfo } from "../types/session";
 import type { ContextUsageInfo } from "../types/settings";
 
@@ -15,47 +15,6 @@ function getWorkspaceRoot(): string {
   const { workspaces, currentWorkspaceId } = useWorkspaceStore.getState();
   const ws = workspaces.find((w) => w.id === currentWorkspaceId);
   return ws?.path || '';
-}
-
-/** 将快照节点合并/插入到节点列表，返回新列表。
- * 去重：目标 user 节点之后已存在快照节点时复用更新（快照创建与消息回填各发射一次事件，
- * 实时 user 节点无 messageId 时会重复插入）；未匹配到 user 节点时插入到列表末尾。
- */
-export function applySnapshotNode(
-  nodes: WorkflowNode[],
-  payload: { messageId?: string; kind: string; createdAt: string },
-  makeNode: () => WorkflowNode<"snapshot">,
-): WorkflowNode[] {
-  const next = [...nodes];
-  let lastUserIdx = -1;
-  if (payload.messageId) {
-    lastUserIdx = next.findIndex(
-      (n) => n.type === "user" && (n.data as { messageId?: string }).messageId === payload.messageId,
-    );
-  }
-  if (lastUserIdx === -1) {
-    for (let i = next.length - 1; i >= 0; i--) {
-      if (next[i].type === "user") {
-        lastUserIdx = i;
-        break;
-      }
-    }
-  }
-  const snapshotTime = new Date(payload.createdAt).getTime();
-  const updateExisting = (target: WorkflowNode) => {
-    target.data = { ...(target.data as { kind: string }), kind: payload.kind };
-    target.timestamp = snapshotTime;
-  };
-  if (lastUserIdx >= 0) {
-    const following = next[lastUserIdx + 1];
-    if (following?.type === "snapshot") updateExisting(following);
-    else next.splice(lastUserIdx + 1, 0, makeNode());
-  } else {
-    const last = next[next.length - 1];
-    if (last?.type === "snapshot") updateExisting(last);
-    else next.push(makeNode());
-  }
-  return next;
 }
 
 /** 按会话缓存的状态条目，切换会话时保存/恢复 */
@@ -122,8 +81,7 @@ export type BackgroundAgentEvent =
   | { type: "compaction_done"; tokensBefore: number; tokensAfter: number; compacted: boolean; error?: string }
   | { type: "sub_agent_status"; agentId: string; status: string; message?: string; iteration: number; taskDescription: string }
   | { type: "sub_agent_tool_call"; agentId: string; toolName: string; arguments: Record<string, unknown>; iteration: number }
-  | { type: "question"; questionId: string; questions: QuestionItem[] }
-  | { type: "snapshot_created"; messageId?: string; kind: string; createdAt: string };
+  | { type: "question"; questionId: string; questions: QuestionItem[] };
 
 /** addToolNodeFromEvent 方法的返回结果 */
 export interface AddToolNodeEventResult {
@@ -360,21 +318,6 @@ function convertMessagesToNodes(
         } as UserNodeData,
         isExpanded: true,
       });
-
-      // 用户消息附带快照信息（回退/新分支起点）时，追加快照节点
-      if (msg.metadata?.snapshot) {
-        const snapshot = msg.metadata.snapshot as { kind?: string; createdAt?: string };
-        nodes.push({
-          id: `node_${++nodeCounter}`,
-          type: "snapshot",
-          status: "completed",
-          timestamp: snapshot.createdAt ? new Date(snapshot.createdAt).getTime() : msgTimestamp,
-          data: {
-            kind: snapshot.kind ?? "files",
-          } as SnapshotNodeData,
-          isExpanded: true,
-        });
-      }
     } else if (msg.role === "assistant") {
       // 检查是否为 error 节点
       if (msg.metadata?.nodeType === "error") {
@@ -1690,23 +1633,6 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           },
           isExpanded: true,
         });
-        break;
-      }
-      case "snapshot_created": {
-        // 快照节点：优先插入到 messageId 对应的 user 节点之后，找不到则追加末尾（公共函数内已去重）
-        nodes = applySnapshotNode(
-          nodes,
-          { messageId: event.messageId, kind: event.kind, createdAt: event.createdAt },
-          () =>
-            ({
-              id: `bg_node_${++bgNodeCounter}`,
-              type: "snapshot",
-              status: "completed",
-              timestamp: new Date(event.createdAt).getTime(),
-              data: { kind: event.kind },
-              isExpanded: true,
-            }) as WorkflowNode<"snapshot">,
-        );
         break;
       }
     }

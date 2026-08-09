@@ -12,7 +12,6 @@ import { SubAgentNode } from "./SubAgentNode";
 import { QuestionNode } from "./QuestionNode";
 import { StatsNode } from "./StatsNode";
 import { PausedNode } from "./PausedNode";
-import { SnapshotNode } from "./SnapshotNode";
 
 interface WorkflowNodeRendererProps {
   node: WorkflowNode;
@@ -60,9 +59,6 @@ export function WorkflowNodeRenderer({ node, onRetry, hideCopy, nodeRef }: Workf
       break;
     case "paused":
       content = <PausedNode node={node as WorkflowNode<"paused">} />;
-      break;
-    case "snapshot":
-      content = <SnapshotNode node={node as WorkflowNode<"snapshot">} />;
       break;
     default:
       content = null;

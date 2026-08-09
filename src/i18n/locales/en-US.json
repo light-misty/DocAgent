@@ -82,7 +82,6 @@
     "undoRollback": "Undo Rollback",
     "undoingRollback": "Restoring...",
     "undoRollbackFailed": "Failed to undo rollback. Please try again later.",
-    "snapshotCreated": "File snapshot created",
     "confirmCreateBranch": "Confirm Create Branch",
     "cancelCreateBranch": "Cancel",
     "previousBranch": "Previous Branch",

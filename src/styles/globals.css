@@ -1406,21 +1406,6 @@
   cursor: not-allowed;
 }
 
-/* 快照节点提示：灰底小字，与暂停节点一致 */
-.wf-snapshot-notice {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-}
-
-.wf-snapshot-kind {
-  font-size: 11px;
-  opacity: 0.7;
-}
-
 /* 编辑模式 contentEditable div — 完全继承消息框样式，保持尺寸一致 */
 .wf-user-edit-div {
   outline: none;
