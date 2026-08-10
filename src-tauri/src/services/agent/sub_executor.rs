@@ -15,7 +15,10 @@ use tokio::sync::RwLock;
 use super::{is_document_handler, AgentMode, EXPLORE_TOOL_NAMES};
 use crate::db::sub_agent_message_repo;
 use crate::db::Database;
-use crate::errors::{CommandError, TOOL_INVALID_PARAMS, TOOL_NOT_FOUND};
+use crate::errors::{
+    CommandError, AGENT_EXECUTION_ERROR, AGENT_SUB_AGENT_STOPPED, TOOL_INVALID_PARAMS,
+    TOOL_NOT_FOUND,
+};
 use crate::events::types::{
     SubAgentContentPayload, SubAgentStatusPayload, SubAgentThinkingPayload,
     SubAgentToolCallPayload, SubAgentToolResultPayload, AGENT_SUB_AGENT_CONTENT,
@@ -26,6 +29,7 @@ use crate::models::llm::{ChatMessage, LlmToolCall, ToolDefinition};
 use crate::models::sub_agent::{SubAgentConfig, SubAgentResult, ToolCallRecord};
 use crate::models::tool::ToolResult;
 use crate::services::llm::router::LlmRouter;
+use crate::services::permission::doom_loop::DoomLoopDetector;
 use crate::services::permission::evaluator::{PermissionEvaluator, PermissionRequest};
 use crate::services::permission::registry::PermissionRegistry;
 use crate::services::permission::types::{PermissionAction, PermissionType};
@@ -111,6 +115,15 @@ pub trait SubAgentExecTrait: Send + Sync {
     async fn exec_sub_agent(&self, config: SubAgentConfig) -> SubAgentResult;
 }
 
+/// 判断会话是否已被用户停止（纯函数，便于单元测试）
+/// active_agents 中不存在或值为 false 表示已停止（与主 Agent should_stop 语义一致）
+fn is_session_stopped(active_agents: &HashMap<String, bool>, session_id: &str) -> bool {
+    match active_agents.get(session_id) {
+        Some(running) => !*running,
+        None => true,
+    }
+}
+
 /// 子 Agent 执行内部结果
 struct ExecResult {
     /// 最终消息（LLM 最后一次回复内容）
@@ -137,6 +150,10 @@ pub struct SubAgentExecutor {
     app_handle: Option<AppHandle<Wry>>,
     /// 数据库连接（用于持久化子 Agent 消息）
     db: Arc<Database>,
+    /// 活动 Agent 注册表（与主 Agent 共享，用于检测父会话是否被用户停止）
+    active_agents: Arc<tokio::sync::Mutex<HashMap<String, bool>>>,
+    /// Doom loop 检测器（与主 Agent 共享，检测子 Agent 连续相同调用）
+    doom_loop_detector: Arc<DoomLoopDetector>,
 }
 
 impl SubAgentExecutor {
@@ -147,6 +164,8 @@ impl SubAgentExecutor {
         permission_registry: Arc<PermissionRegistry>,
         app_handle: Option<AppHandle<Wry>>,
         db: Arc<Database>,
+        active_agents: Arc<tokio::sync::Mutex<HashMap<String, bool>>>,
+        doom_loop_detector: Arc<DoomLoopDetector>,
     ) -> Self {
         Self {
             llm_router,
@@ -154,7 +173,33 @@ impl SubAgentExecutor {
             permission_registry,
             app_handle,
             db,
+            active_agents,
+            doom_loop_detector,
         }
+    }
+
+    /// 检查父会话是否已被用户停止
+    /// 锁竞争时保守处理为未停止（与主 Agent should_stop 的 try_lock 语义一致）
+    async fn is_stopped(&self, session_id: &str) -> bool {
+        match self.active_agents.try_lock() {
+            Ok(guard) => is_session_stopped(&guard, session_id),
+            Err(_) => false,
+        }
+    }
+
+    /// 协作式停止检查：父会话已停止时返回错误（供 execute_inner 各检查点调用）
+    async fn check_stopped(&self, config: &SubAgentConfig) -> Result<(), CommandError> {
+        if self.is_stopped(&config.parent_session_id).await {
+            log::info!(
+                "子 Agent 检测到父会话已停止，终止执行: agent_id={}",
+                config.agent_id
+            );
+            return Err(CommandError::agent(
+                AGENT_SUB_AGENT_STOPPED,
+                "Sub-agent stopped by user",
+            ));
+        }
+        Ok(())
     }
 
     /// 统一事件发射方法
@@ -262,12 +307,18 @@ impl SubAgentExecutor {
             }
             // 执行失败（返回错误）
             Ok(Err(e)) => {
-                log::warn!("子 Agent 执行失败: agent_id={}, 错误: {}", agent_id, e);
-                // 发射状态变更事件：执行失败（附带错误信息）
+                // 区分"被用户停止"与"普通失败"：停止时发射 cancelled 状态
+                let stopped = e.code == AGENT_SUB_AGENT_STOPPED;
+                if stopped {
+                    log::info!("子 Agent 已被用户停止: agent_id={}", agent_id);
+                } else {
+                    log::warn!("子 Agent 执行失败: agent_id={}, 错误: {}", agent_id, e);
+                }
+                // 发射状态变更事件：执行失败/停止（附带错误信息）
                 self.emit_status(
                     &parent_session_id,
                     &agent_id,
-                    "failed",
+                    if stopped { "cancelled" } else { "failed" },
                     Some(e.to_string()),
                     0,
                     &config.task_description,
@@ -382,6 +433,9 @@ impl SubAgentExecutor {
         // 迭代循环：调用 LLM → 执行工具 → 返回结果给 LLM
         while iterations < config.max_iterations {
             iterations += 1;
+
+            // 检查父会话是否已被用户停止（协作式停止，与主 Agent 语义一致）
+            self.check_stopped(&config).await?;
 
             // 获取 LlmRouter 的 Arc 引用（读锁获取后立即 clone 释放）
             let router = self.llm_router.read().await.clone();
@@ -524,12 +578,36 @@ impl SubAgentExecutor {
                 for tool_call in tool_calls_vec.iter() {
                     tool_calls_count += 1;
 
+                    // 检查父会话是否已被用户停止（工具执行前再次检查，加快停止响应）
+                    self.check_stopped(&config).await?;
+
                     // 解析 arguments 字符串为 Value（解析失败时使用空对象）
                     let tool_args: Value = if tool_call.arguments.is_empty() {
                         serde_json::json!({})
                     } else {
                         serde_json::from_str(&tool_call.arguments).unwrap_or(serde_json::json!({}))
                     };
+
+                    // Doom loop 检测：连续多次相同调用时直接终止子 Agent（防止循环卡死）
+                    // 按 agent_id 隔离历史，不与父会话的调用历史混淆
+                    if self
+                        .doom_loop_detector
+                        .record_and_check(&config.agent_id, &tool_call.name, &tool_args)
+                        .await
+                    {
+                        log::warn!(
+                            "子 Agent 检测到 Doom loop，终止执行: agent_id={}, tool={}",
+                            config.agent_id,
+                            tool_call.name
+                        );
+                        return Err(CommandError::agent(
+                            AGENT_EXECUTION_ERROR,
+                            format!(
+                                "Doom loop detected: tool {} called too many times consecutively",
+                                tool_call.name
+                            ),
+                        ));
+                    }
 
                     // 发射子 Agent 工具调用事件（含 tool_call_id）
                     self.emit_event(
@@ -821,5 +899,36 @@ impl SubAgentExecutor {
 impl SubAgentExecTrait for SubAgentExecutor {
     async fn exec_sub_agent(&self, config: SubAgentConfig) -> SubAgentResult {
         self.execute(config).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_session_stopped;
+    use std::collections::HashMap;
+
+    /// 构造 active_agents 辅助函数
+    fn make_agents(running: bool) -> HashMap<String, bool> {
+        let mut map = HashMap::new();
+        map.insert("s1".to_string(), running);
+        map
+    }
+
+    #[test]
+    fn test_session_not_present_means_stopped() {
+        // 会话不在 active_agents 中视为已停止（父 Agent 已结束）
+        assert!(is_session_stopped(&HashMap::new(), "s1"));
+    }
+
+    #[test]
+    fn test_session_running_not_stopped() {
+        let agents = make_agents(true);
+        assert!(!is_session_stopped(&agents, "s1"));
+    }
+
+    #[test]
+    fn test_session_marked_stopped() {
+        let agents = make_agents(false);
+        assert!(is_session_stopped(&agents, "s1"));
     }
 }

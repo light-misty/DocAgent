@@ -772,6 +772,7 @@ Rust后端 ──JSON──> stdin  ┌─────────────�
 | 2005 | AGENT_OPERATION_REJECTED | 操作被用户拒绝 |
 | 2006 | AGENT_HANDLER_NOT_FOUND | Handler不存在 |
 | 2008 | AGENT_EXECUTION_ERROR | Agent执行内部错误 |
+| 2009 | AGENT_SUB_AGENT_STOPPED | 子Agent被用户停止 |
 | 2010 | AGENT_SESSION_NOT_FOUND | 会话不存在 |
 
 ### 15.4 文档处理错误 (3xxx)

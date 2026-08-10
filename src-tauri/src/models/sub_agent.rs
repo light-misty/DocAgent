@@ -19,7 +19,7 @@ pub struct SubAgentConfig {
     pub workspace_root: String,
     /// 最大迭代次数（默认 10）
     pub max_iterations: u32,
-    /// 超时时间（秒，默认 300）
+    /// 超时时间（秒，默认 600）
     pub timeout_seconds: u64,
     /// 可用工具列表（空表示继承所有工具）
     pub allowed_tools: Vec<String>,
@@ -41,7 +41,7 @@ impl Default for SubAgentConfig {
             system_prompt: String::new(),
             workspace_root: String::new(),
             max_iterations: 10,
-            timeout_seconds: 300,
+            timeout_seconds: 600,
             allowed_tools: Vec::new(),
             agent_mode: "build".to_string(),
             nesting_depth: 0,

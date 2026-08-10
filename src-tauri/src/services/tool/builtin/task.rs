@@ -128,10 +128,10 @@ impl Tool for TaskTool {
                             },
                             "timeoutSeconds": {
                                 "type": "integer",
-                                "description": "Sub-agent timeout in seconds (default 300, max 600)",
-                                "default": 300,
+                                "description": "Sub-agent timeout in seconds (default 600, max 1800)",
+                                "default": 600,
                                 "minimum": 1,
-                                "maximum": 600
+                                "maximum": 1800
                             }
                         },
                         "required": ["description"]
@@ -146,10 +146,10 @@ impl Tool for TaskTool {
                 },
                 "timeoutSeconds": {
                     "type": "integer",
-                    "description": "Sub-agent timeout in seconds (default 300, max 600)",
-                    "default": 300,
+                    "description": "Sub-agent timeout in seconds (default 600, max 1800)",
+                    "default": 600,
                     "minimum": 1,
-                    "maximum": 600
+                    "maximum": 1800
                 },
                 "allowedTools": {
                     "type": "array",
@@ -219,12 +219,12 @@ impl TaskTool {
             .unwrap_or(10)
             .clamp(1, 50) as u32;
 
-        // 3. 提取 timeoutSeconds（默认 300，限制最大 600）
+        // 3. 提取 timeoutSeconds（默认 600，限制最大 1800）
         let timeout_seconds = params
             .get("timeoutSeconds")
             .and_then(|v| v.as_u64())
-            .unwrap_or(300)
-            .clamp(1, 600);
+            .unwrap_or(600)
+            .clamp(1, 1800);
 
         // 4. 提取 allowedTools（空表示继承所有工具）
         let allowed_tools: Vec<String> = params
@@ -457,12 +457,12 @@ impl TaskTool {
                 .unwrap_or(10)
                 .clamp(1, 50) as u32;
 
-            // 提取单个任务的 timeoutSeconds（默认 300，限制最大 600）
+            // 提取单个任务的 timeoutSeconds（默认 600，限制最大 1800）
             let timeout_seconds = task
                 .get("timeoutSeconds")
                 .and_then(|v| v.as_u64())
-                .unwrap_or(300)
-                .clamp(1, 600);
+                .unwrap_or(600)
+                .clamp(1, 1800);
 
             // 构建 SubAgentConfig（agent_id 用 UUID，nesting_depth = current_depth + 1）
             let agent_id = Uuid::new_v4().to_string();

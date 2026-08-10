@@ -32,6 +32,7 @@ pub const AGENT_CONFIRMATION_TIMEOUT: u32 = 2004;
 pub const AGENT_OPERATION_REJECTED: u32 = 2005;
 pub const AGENT_HANDLER_NOT_FOUND: u32 = 2006;
 pub const AGENT_EXECUTION_ERROR: u32 = 2008;
+pub const AGENT_SUB_AGENT_STOPPED: u32 = 2009;
 pub const AGENT_SESSION_NOT_FOUND: u32 = 2010;
 
 // ============================================================
