@@ -14,25 +14,103 @@
 
 ### 各模型思考强度档位（官方数据）
 
+### OpenAI 系
+
 | 模型（关键词） | 可用档位 | API 参数形态 |
 |---|---|---|
-| deepseek-v4-flash / v4-pro / v3.2 | `high`, `max`（low/medium→high，xhigh→max） | OpenAI 格式 `reasoning_effort` + `thinking.type` 开关 |
-| o1 / o3 / o4-mini | `low`, `medium`, `high` | `reasoning_effort` |
-| gpt-5 | `minimal`, `low`, `medium`, `high` | `reasoning_effort` |
-| gpt-5.1 系（含 codex） | `none`, `low`, `medium`, `high`（codex-max 加 `xhigh`） | `reasoning_effort` |
-| gpt-5.2 系 | `none`, `low`, `medium`, `high`, `xhigh` | `reasoning_effort` |
-| gpt-5.6 系 | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `reasoning_effort` |
-| gpt-5-pro | 仅 `high` | `reasoning_effort` |
-| claude-sonnet-4.x / 4.5 / 4.6 / haiku-4.5 | `low`, `medium`, `high`（Sonnet 无 max） | Messages `thinking.budget_tokens` 或 `adaptive` + `output_config.effort` |
-| claude-opus-4.x / 4.6 / 4.7 | `low`, `medium`, `high`, `max` | 同上（4.7/4.8 仅 adaptive） |
-| claude-sonnet-5 / opus-5 | `low`, `medium`, `high`, `max`（默认 high） | `thinking` adaptive |
-| gemini-2.5-pro / flash | `low`, `medium`, `high`（动态默认） | `thinkingConfig.thinkingBudget` |
-| gemini-2.5-flash-lite | `low`, `medium`, `high`（默认不思考） | 同上 |
-| gemini-3 系 | `minimal`, `low`, `medium`, `high`（3.1-pro 仅 low/medium/high） | `thinkingConfig.thinkingLevel` |
-| doubao-seed 系 | `minimal`, `low`, `medium`, `high` | `reasoning.effort`（OpenAI 兼容） |
+| GPT-5.2 及之后（含 GPT-5.6 系列） | `none`, `low`, `medium`, `high`, `xhigh` | `reasoning_effort` |
+| GPT-5.6 Sol / Terra / Luna | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `reasoning_effort` |
+| Codex 模型（GPT-5.2 Codex 及之后） | `low`, `medium`, `high`, `xhigh` | `reasoning_effort` |
+| GPT-5.1 Codex | `low`, `medium`, `high` | `reasoning_effort` |
+| Pro 模型（GPT-5.5 Pro） | `medium`, `high`, `xhigh` | `reasoning_effort` |
+| GPT-5 / GPT-5 mini / GPT-5 nano | `minimal`, `low`, `medium`, `high` | `reasoning_effort` |
+| o 系列（o1, o3, o3-mini, o4-mini） | `low`, `medium`, `high` | `reasoning_effort` |
+| gpt-5.4 / gpt-5.4-mini / gpt-5.4-nano | `none`, `low`, `medium`, `high`, `xhigh`（完整推理档位） | `reasoning_effort` |
+
+> 注：GPT-5.6 系列于 2026-07-09 正式 GA。请求不支持的档位会返回错误并列出可用值。
+
+### DeepSeek
+
+| 模型（关键词） | 可用档位 | API 参数形态 |
+|---|---|---|
+| deepseek-v4-flash | `low`, `high`, `max`（`medium`/`xhigh` 映射） | `reasoning_effort` |
+| deepseek-v4-pro | `high`, `max`（`low`→`high`，`xhigh`→`max`） | `reasoning_effort` |
+
+> 注：思考模式默认打开，`effort` 默认为 `high`。思考模式下 `temperature`/`top_p` 不生效。
+
+### Anthropic（Claude）
+
+| 模型（关键词） | 可用档位 | API 参数形态 |
+|---|---|---|
+| Opus 4.0 / 4.1 | 无（早于 effort 支持） | — |
+| Opus 4.5 | `low`, `medium`, `high` | `output_config.effort` |
+| Opus 4.6 | `low`, `medium`, `high`, `max` | `output_config.effort` |
+| Opus 4.7 / 4.8 | `low`, `medium`, `high`, `xhigh`, `max` | `output_config.effort` |
+| Opus 5+ | `low`, `medium`, `high`, `xhigh`, `max` | `output_config.effort` |
+| Sonnet 4.0 / 4.1 / 4.5 | 无（拒绝 effort） | — |
+| Sonnet 4.6 | `low`, `medium`, `high`, `max` | `output_config.effort` |
+| Sonnet 5+ | `low`, `medium`, `high`, `xhigh`, `max` | `output_config.effort` |
+| Haiku 4.x | 无（官方 effort 支持列表不含 Haiku，发送会返回 400） | — |
+
+> 注：Opus 4.7 起废弃固定 `budget_tokens`，改用 `output_config.effort`。`xhigh` 专为长期编码和代理任务设计。`max` 官方描述为"容易过度思考"。effort 参数已 GA，全部支持模型无需 beta header（Opus 4.5 早期 beta 期需 `effort-2025-11-24` 头，现已取消）。
+
+### Google Gemini
+
+| 模型（关键词） | 可用档位 | API 参数形态 |
+|---|---|---|
+| Gemini 2.5 Pro | `low`, `medium`, `high`（动态默认，不支持 `minimal`） | `thinkingConfig.thinkingBudget`（128–32768） |
+| Gemini 2.5 Flash | `low`, `medium`, `high`（动态默认） | `thinkingConfig.thinkingBudget`（0–24576） |
+| Gemini 2.5 Flash Lite | `low`, `medium`, `high`（默认不思考） | `thinkingConfig.thinkingBudget`（512–24576） |
+| Gemini 3.x / 3.5 Flash | `minimal`, `low`, `medium`, `high` | `thinkingConfig.thinkingLevel` |
+| Gemini 3.1 Pro | `low`, `medium`, `high`（不支持 `minimal`） | `thinkingConfig.thinkingLevel` |
+
+> 注：Gemini 2.5 用 `thinkingBudget`，Gemini 3 用 `thinkingLevel`，不可混用。`thinkingBudget=0` 关闭思考，`-1` 动态思考。Pro 模型默认 `high`，Flash 默认 `high`（Gemini 3）/ `medium`（3.5），Flash-Lite 默认 `minimal`。
+
+### xAI Grok
+
+| 模型（关键词） | 可用档位 | API 参数形态 |
+|---|---|---|
+| Grok 4.3 | `none`, `low`, `medium`, `high` | `reasoning_effort` |
+| Grok 4.5 | `low`, `medium`, `high`（默认 `high`） | `reasoning_effort` |
+
+> 注：Grok 4.5 于 2026-07-08 GA。Grok 3 被归类为 Grok 4.3 别名，同样支持完整档位。
+
+### Mistral
+
+| 模型（关键词） | 可用档位 | API 参数形态 |
+|---|---|---|
+| Mistral Small 4（mistral-small-2603） | `none`, `high`（仅两档） | `reasoning_effort` |
+| Magistral 系列 | 无（原生推理，不接收参数） | — |
+
+> 注：Mistral Small 4 的 `none` 等同于 Mistral Small 3.2 的聊天风格，`high` 提供与之前 Magistral 模型相当的详细程度。
+
+### 国内模型
+
+| 模型（关键词） | 可用档位 | API 参数形态 |
+|---|---|---|
+| Kimi K3 | `low`, `high`, `max`（默认 `max`） | `reasoning_effort` |
+| Kimi K2.7-code | 不支持（始终思考） | — |
+| GLM-5.2 | `high`, `max`（默认 `max`）；`off` 用 `thinking.type: disabled` 关闭思考 | `reasoning_effort` |
+| Qwen 3（DashScope） | 仅布尔值 `enable_thinking`（无档位） | — |
+| 蚂蚁百灵 Ring-2.6-1T | `high`, `xhigh` | `reasoning_effort` |
+
+> 注：Kimi K3 始终推理，切换档位可能影响缓存命中。Qwen 混合模型通过 `enable_thinking` 开启/关闭思考。GLM-5 / 5.1 官方不支持 `reasoning_effort`（智谱文档标注仅 GLM-5.2 及以上支持；GLM-5 开源部署仅接受 `max`/`high`，设置其他值按 `max` 运行），故不收录。
+
+### 其他平台与模型
+
+| 模型/平台（关键词） | 可用档位 | API 参数形态 |
+|---|---|---|
+| Fireworks（DeepSeek V4 Pro / GLM-5.1 / GPT-OSS 120B） | `low`, `medium`, `high`, `xhigh`, `max` | `reasoning_effort` |
+| Groq（Qwen3 等推理模型） | `none`, `default`（仅两值，不接受 low/medium/high） | `reasoning_effort` |
+| Together AI（GPT-OSS 120B / GLM-5.2 / Inkling） | `low`, `medium`, `high` | `reasoning_effort` |
+| OpenRouter | 统一 `reasoning: { effort }` 对象，支持 `none`/`minimal`/`low`/`medium`/`high`/`xhigh` | 嵌套 `reasoning` 对象 |
+| Perplexity（Sonar Reasoning Pro） | `minimal`, `low`, `medium`, `high` | `reasoning_effort` |
+| Cohere（Command A+） | `minimal`, `low`, `medium`, `high`, `xhigh` → 映射为 `thinking.token_budget` | `reasoning_effort` |
+
+> 注：Fireworks 支持 `xhigh`/`max` 等扩展档位。Groq API 对 `reasoning_effort` 有严格限制，仅接受 `none` 或 `default`。OpenRouter 使用嵌套 `reasoning` 对象而非顶层 `reasoning_effort`。
 
 ### 关键约束
-- **Anthropic**：开启 thinking 时**禁止**传 `temperature` / `top_p`（否则 400）；`budget_tokens` 必须小于 `max_tokens`
+- **Anthropic**：发送 `output_config.effort` 时移除 `temperature` / `top_p`（与 extended thinking 一致的保守策略）；`effort` 已 GA 无需 beta header
 - **OpenAI 推理模型**：Chat Completions 端点不支持 `temperature` / `top_p`（部分报错）；gpt-5.4+ 的 `tools` 与 `reasoning_effort` 非 `none` 时互斥（本项目有工具调用，需注意——默认不设置 `reasoning_effort` 时不受影响，显式设置时用户自行承担）
 - **DeepSeek**：思考模式下 `temperature` / `top_p` 无效但不报错；思考默认开启，`thinking.type=disabled` 可关闭
 - **Gemini**：`thinkingBudget`（2.5）与 `thinkingLevel`（3）不可混用；`thinkingBudget=0` 关闭、`-1` 动态
@@ -73,13 +151,12 @@ interface ReasoningEffortRule {
 ### OpenAiAdapter（openai / custom / ollama）
 - 档位存在且非 `off`：`body["reasoning_effort"] = value`；**跳过** `temperature` / `top_p`
 - `off` 档：
-  - API base 含 `deepseek` → `body["thinking"] = {"type": "disabled"}`（保留 temperature/top_p，DeepSeek 不报错）
+  - API base 含 `deepseek` 或模型名含 `glm` → `body["thinking"] = {"type": "disabled"}`（保留 temperature/top_p；DeepSeek 思考默认开启，GLM-5.2 官方推荐用该方式关闭思考）
   - 其他 → `body["reasoning_effort"] = "none"`；跳过 temperature/top_p
 
 ### AnthropicAdapter
-- 档位存在且非 `off`：`body["thinking"] = {"type": "enabled", "budget_tokens": N}`；**跳过** `temperature` / `top_p`
-  - budget 换算（参考 Requesty/liteLLM 标准）：`low→1024`，`medium→8192`，`high→16384`，`max→max_tokens-1`
-- `off` / None：不发送 thinking（保持现有行为）
+- 档位存在且非 `off`：`body["output_config"] = {"effort": value}`（官方推荐参数形态，直接透传，替代废弃的 budget_tokens 换算）；**跳过** `temperature` / `top_p`
+- `off` / None：不发送 effort（模型默认 `high`，保持现有行为）
 
 ### GeminiAdapter
 - 档位存在且非 `off`：
@@ -122,7 +199,7 @@ zh-CN / en-US 新增：
 
 Rust 单元测试（adapter 现有 `#[cfg(test)]` 模块）：
 1. OpenAI 兼容：设置 `reasoning_effort=high` → body 含 `reasoning_effort` 且无 `temperature`；`off` + deepseek → `thinking.type=disabled`
-2. Anthropic：`high` → `thinking.budget_tokens=16384` 且无 `temperature`/`top_p`；`None` → 无 thinking 字段
+2. Anthropic：`high` → `output_config.effort="high"` 且无 `temperature`/`top_p`；`None` → 无 `output_config` 字段
 3. Gemini：`high` + gemini-2.5 → `thinkingBudget=24576`；`low` + gemini-3 → `thinkingLevel="LOW"`；`off` → `thinkingBudget=0`
 4. `None`（未设置）时三个 adapter 请求体与现有逻辑完全一致（回归）
 

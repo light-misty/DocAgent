@@ -118,9 +118,12 @@
     "saveFailed": "保存失败：{{error}}",
     "levels": {
       "off": "关闭",
+      "none": "无推理",
+      "minimal": "极低",
       "low": "低",
       "medium": "中",
       "high": "高",
+      "xhigh": "极高",
       "max": "最高"
     }
   },

@@ -260,6 +260,7 @@ impl GeminiAdapter {
         // 思考强度（reasoning_effort）：
         // - Gemini 2.5 系列使用 thinkingBudget（token 数），off 时用 0 关闭思考
         // - Gemini 3 系列使用 thinkingLevel（字符串档位），off 时用 MINIMAL 关闭思考
+        // - minimal 档位仅 Gemini 3 系列支持（规则表限制），2.5 系列防御性给 0
         // - 未设置：保留 includeThoughts=true 的默认行为
         if let Some(effort) = &self.advanced.reasoning_effort {
             let is_gemini_3 = self.model.contains("gemini-3");
@@ -271,6 +272,7 @@ impl GeminiAdapter {
                 }
             } else {
                 let (budget, level) = match effort.as_str() {
+                    "minimal" => (0, "MINIMAL"),
                     "low" => (1024, "LOW"),
                     "medium" => (8192, "MEDIUM"),
                     "high" => (24576, "HIGH"),
@@ -1263,6 +1265,25 @@ mod tests {
 
         let tc = &body["generationConfig"]["thinkingConfig"];
         assert_eq!(tc["thinkingLevel"].as_str().unwrap(), "LOW");
+        assert!(tc.get("thinkingBudget").is_none());
+    }
+
+    /// 测试 Gemini 3 系列 + minimal 时，thinkingConfig.thinkingLevel=MINIMAL（最低档）
+    #[test]
+    fn test_build_request_body_thinking_level_minimal_3() {
+        let adapter = create_adapter(
+            "gemini-3.5-flash",
+            AdvancedConfig {
+                reasoning_effort: Some("minimal".to_string()),
+                ..AdvancedConfig::default()
+            },
+        );
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], None);
+
+        let tc = &body["generationConfig"]["thinkingConfig"];
+        assert_eq!(tc["thinkingLevel"].as_str().unwrap(), "MINIMAL");
         assert!(tc.get("thinkingBudget").is_none());
     }
 

@@ -118,9 +118,12 @@
     "saveFailed": "Failed to save: {{error}}",
     "levels": {
       "off": "Off",
+      "none": "None",
+      "minimal": "Minimal",
       "low": "Low",
       "medium": "Medium",
       "high": "High",
+      "xhigh": "Extra high",
       "max": "Max"
     }
   },

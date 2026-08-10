@@ -162,11 +162,14 @@ impl OpenAiAdapter {
         body["top_p"] = json!(self.advanced.top_p);
 
         // 思考强度（reasoning_effort）：
-        // - off + DeepSeek：发送 thinking.type=disabled 关闭思考（保留采样参数）
-        // - 其他：原样发送 reasoning_effort（off + 非 DeepSeek 发送 none），并移除 temperature/top_p
+        // - off + DeepSeek/GLM：发送 thinking.type=disabled 关闭思考（保留采样参数）
+        //   （DeepSeek 思考模式默认开启；GLM-5.2 官方推荐用该方式关闭思考）
+        // - 其他：原样发送 reasoning_effort（off + 其他模型发送 none），并移除 temperature/top_p
         //   （推理模型不支持采样参数，OpenAI 会报错、DeepSeek 不生效，因此跳过）
         if let Some(effort) = &self.advanced.reasoning_effort {
-            if effort == "off" && self.api_base_url.contains("deepseek") {
+            let disable_thinking =
+                self.api_base_url.contains("deepseek") || self.model.contains("glm");
+            if effort == "off" && disable_thinking {
                 body["thinking"] = json!({"type": "disabled"});
             } else {
                 body["reasoning_effort"] = json!(if effort == "off" { "none" } else { effort });
@@ -1119,6 +1122,29 @@ mod tests {
         assert!(body.get("top_p").is_none());
         // 不应出现 thinking 字段
         assert!(body.get("thinking").is_none());
+    }
+
+    /// 测试 reasoning_effort=off 且模型为 GLM-5.2 时，发送 thinking.type=disabled 关闭思考
+    /// （GLM 官方推荐通过 thinking.type=disabled 关闭思考，reasoning_effort=none 为兼容值）
+    #[test]
+    fn test_build_request_body_reasoning_effort_off_glm() {
+        let adapter = OpenAiAdapter::new(
+            "https://open.bigmodel.cn/api/paas/v4".to_string(),
+            "test-key".to_string(),
+            "glm-5.2".to_string(),
+            AdvancedConfig {
+                reasoning_effort: Some("off".to_string()),
+                ..AdvancedConfig::default()
+            },
+        );
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], false, None);
+
+        // GLM 使用 thinking.type=disabled 关闭思考模式
+        assert_eq!(body["thinking"]["type"].as_str().unwrap(), "disabled");
+        // 关闭思考后采样参数生效，保留原值
+        assert!(body.get("temperature").is_some());
     }
 
     /// 测试未设置 reasoning_effort 时，请求体保持现有行为（含 temperature/top_p，无思考参数）
