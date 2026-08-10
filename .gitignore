@@ -1,6 +1,5 @@
 # IDE 配置
 .trae/
-.claude/
 .github/copilot-instructions.md
 
 # Rust / Tauri
