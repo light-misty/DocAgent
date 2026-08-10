@@ -63,6 +63,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     allowedInAgent: true,
     requiresArgs: false,
   },
+  {
+    name: "effort",
+    description: "slash.commands.effort.desc",
+    usage: "/effort",
+    allowedInAgent: false,
+    requiresArgs: false,
+  },
 ];
 
 /**

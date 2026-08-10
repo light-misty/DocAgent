@@ -161,6 +161,20 @@ impl OpenAiAdapter {
         body["max_tokens"] = json!(max_tokens_override.unwrap_or(self.advanced.max_tokens));
         body["top_p"] = json!(self.advanced.top_p);
 
+        // 思考强度（reasoning_effort）：
+        // - off + DeepSeek：发送 thinking.type=disabled 关闭思考（保留采样参数）
+        // - 其他：原样发送 reasoning_effort（off + 非 DeepSeek 发送 none），并移除 temperature/top_p
+        //   （推理模型不支持采样参数，OpenAI 会报错、DeepSeek 不生效，因此跳过）
+        if let Some(effort) = &self.advanced.reasoning_effort {
+            if effort == "off" && self.api_base_url.contains("deepseek") {
+                body["thinking"] = json!({"type": "disabled"});
+            } else {
+                body["reasoning_effort"] = json!(if effort == "off" { "none" } else { effort });
+                body.as_object_mut().unwrap().remove("temperature");
+                body.as_object_mut().unwrap().remove("top_p");
+            }
+        }
+
         // 启用工具调用流式输出（tool_stream）
         // 智谱 GLM-5/GLM-4.7/GLM-4.6 系列模型默认 tool_stream=false，
         // 即流式响应中 tool_calls 不以增量方式返回，而是在参数完全生成后一次性返回，
@@ -954,6 +968,20 @@ mod tests {
         )
     }
 
+    /// 辅助函数：构造最简单的 user 消息
+    fn user_message(content: &str) -> ChatMessage {
+        ChatMessage {
+            role: "user".to_string(),
+            content: content.to_string(),
+            content_parts: None,
+            tool_calls: None,
+            tool_call_id: None,
+            reasoning_content: None,
+            attachments: None,
+            metadata: None,
+        }
+    }
+
     /// 测试 reasoning_in_content=true 时，reasoning_content 被折叠到 content 字段
     #[test]
     fn test_build_request_body_reasoning_in_content_true() {
@@ -1031,5 +1059,80 @@ mod tests {
 
         // 不应该有 reasoning_content 字段
         assert!(msg.get("reasoning_content").is_none());
+    }
+
+    /// 测试设置 reasoning_effort=high 时，请求体包含 reasoning_effort 且跳过 temperature/top_p
+    /// （推理模型不支持采样参数，OpenAI 会报错，DeepSeek 不生效）
+    #[test]
+    fn test_build_request_body_reasoning_effort_high() {
+        let adapter = create_adapter(AdvancedConfig {
+            reasoning_effort: Some("high".to_string()),
+            ..AdvancedConfig::default()
+        });
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], false, None);
+
+        // reasoning_effort 应原样发送
+        assert_eq!(body["reasoning_effort"].as_str().unwrap(), "high");
+        // 推理模式下跳过 temperature/top_p
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("top_p").is_none());
+    }
+
+    /// 测试 reasoning_effort=off 且 API base 为 DeepSeek 时，发送 thinking.type=disabled 关闭思考
+    #[test]
+    fn test_build_request_body_reasoning_effort_off_deepseek() {
+        let adapter = OpenAiAdapter::new(
+            "https://api.deepseek.com".to_string(),
+            "test-key".to_string(),
+            "deepseek-v4-pro".to_string(),
+            AdvancedConfig {
+                reasoning_effort: Some("off".to_string()),
+                ..AdvancedConfig::default()
+            },
+        );
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], false, None);
+
+        // DeepSeek 使用 thinking.type=disabled 关闭思考模式
+        assert_eq!(body["thinking"]["type"].as_str().unwrap(), "disabled");
+        // DeepSeek 思考模式下 temperature/top_p 不报错，保留原值
+        assert!(body.get("temperature").is_some());
+    }
+
+    /// 测试 reasoning_effort=off 且非 DeepSeek 时，发送 reasoning_effort=none 并跳过 temperature/top_p
+    #[test]
+    fn test_build_request_body_reasoning_effort_off_other() {
+        let adapter = create_adapter(AdvancedConfig {
+            reasoning_effort: Some("off".to_string()),
+            ..AdvancedConfig::default()
+        });
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], false, None);
+
+        // 非 DeepSeek 使用 reasoning_effort=none 关闭推理
+        assert_eq!(body["reasoning_effort"].as_str().unwrap(), "none");
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("top_p").is_none());
+        // 不应出现 thinking 字段
+        assert!(body.get("thinking").is_none());
+    }
+
+    /// 测试未设置 reasoning_effort 时，请求体保持现有行为（含 temperature/top_p，无思考参数）
+    #[test]
+    fn test_build_request_body_no_reasoning_effort() {
+        let adapter = create_adapter(AdvancedConfig::default());
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], false, None);
+
+        // 现有行为不变：temperature/top_p 保留，无 reasoning_effort/thinking 字段
+        assert!(body.get("temperature").is_some());
+        assert!(body.get("top_p").is_some());
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("thinking").is_none());
     }
 }

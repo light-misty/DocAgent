@@ -73,6 +73,8 @@ export interface ProviderConfig {
   contextWindow?: number;
   /** 是否支持视觉/图片多模态 */
   supportsVision: boolean;
+  /** 思考强度档位（如 "off"/"low"/"medium"/"high"/"max"），未设置时由模型默认决定 */
+  reasoningEffort?: string;
 }
 
 export interface ProviderInfo {
@@ -88,6 +90,8 @@ export interface ProviderInfo {
   contextWindow: number;
   /** 是否支持视觉/图片多模态 */
   supportsVision: boolean;
+  /** 思考强度档位（如 "off"/"low"/"medium"/"high"/"max"），未设置时由模型默认决定 */
+  reasoningEffort?: string;
 }
 
 export interface ConnectionResult {

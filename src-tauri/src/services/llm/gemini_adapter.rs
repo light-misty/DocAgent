@@ -257,6 +257,34 @@ impl GeminiAdapter {
             }
         });
 
+        // 思考强度（reasoning_effort）：
+        // - Gemini 2.5 系列使用 thinkingBudget（token 数），off 时用 0 关闭思考
+        // - Gemini 3 系列使用 thinkingLevel（字符串档位），off 时用 MINIMAL 关闭思考
+        // - 未设置：保留 includeThoughts=true 的默认行为
+        if let Some(effort) = &self.advanced.reasoning_effort {
+            let is_gemini_3 = self.model.contains("gemini-3");
+            if effort == "off" {
+                if is_gemini_3 {
+                    body["generationConfig"]["thinkingConfig"]["thinkingLevel"] = json!("MINIMAL");
+                } else {
+                    body["generationConfig"]["thinkingConfig"]["thinkingBudget"] = json!(0);
+                }
+            } else {
+                let (budget, level) = match effort.as_str() {
+                    "low" => (1024, "LOW"),
+                    "medium" => (8192, "MEDIUM"),
+                    "high" => (24576, "HIGH"),
+                    "max" => (32768, "MAX"),
+                    _ => (8192, "MEDIUM"),
+                };
+                if is_gemini_3 {
+                    body["generationConfig"]["thinkingConfig"]["thinkingLevel"] = json!(level);
+                } else {
+                    body["generationConfig"]["thinkingConfig"]["thinkingBudget"] = json!(budget);
+                }
+            }
+        }
+
         body
     }
 
@@ -1168,5 +1196,105 @@ impl LlmProvider for GeminiAdapter {
                 })
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::llm_config::AdvancedConfig;
+
+    /// 辅助函数：创建 GeminiAdapter
+    fn create_adapter(model: &str, advanced: AdvancedConfig) -> GeminiAdapter {
+        GeminiAdapter::new(
+            "https://generativelanguage.googleapis.com/v1beta".to_string(),
+            "test-key".to_string(),
+            model.to_string(),
+            advanced,
+        )
+    }
+
+    /// 辅助函数：构造最小 user 消息
+    fn user_message(content: &str) -> ChatMessage {
+        ChatMessage {
+            role: "user".to_string(),
+            content: content.to_string(),
+            content_parts: None,
+            tool_calls: None,
+            tool_call_id: None,
+            reasoning_content: None,
+            attachments: None,
+            metadata: None,
+        }
+    }
+
+    /// 测试 Gemini 2.5 系列 + high 时，thinkingConfig.thinkingBudget 按 high→24576 换算
+    #[test]
+    fn test_build_request_body_thinking_budget_25() {
+        let adapter = create_adapter(
+            "gemini-2.5-pro",
+            AdvancedConfig {
+                reasoning_effort: Some("high".to_string()),
+                ..AdvancedConfig::default()
+            },
+        );
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], None);
+
+        let tc = &body["generationConfig"]["thinkingConfig"];
+        assert_eq!(tc["thinkingBudget"].as_i64().unwrap(), 24576);
+        assert!(tc.get("thinkingLevel").is_none());
+    }
+
+    /// 测试 Gemini 3 系列 + low 时，thinkingConfig.thinkingLevel=LOW
+    #[test]
+    fn test_build_request_body_thinking_level_3() {
+        let adapter = create_adapter(
+            "gemini-3.1-pro",
+            AdvancedConfig {
+                reasoning_effort: Some("low".to_string()),
+                ..AdvancedConfig::default()
+            },
+        );
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], None);
+
+        let tc = &body["generationConfig"]["thinkingConfig"];
+        assert_eq!(tc["thinkingLevel"].as_str().unwrap(), "LOW");
+        assert!(tc.get("thinkingBudget").is_none());
+    }
+
+    /// 测试 reasoning_effort=off 时，Gemini 2.5 系列 thinkingBudget=0 关闭思考
+    #[test]
+    fn test_build_request_body_thinking_off_25() {
+        let adapter = create_adapter(
+            "gemini-2.5-flash",
+            AdvancedConfig {
+                reasoning_effort: Some("off".to_string()),
+                ..AdvancedConfig::default()
+            },
+        );
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], None);
+
+        let tc = &body["generationConfig"]["thinkingConfig"];
+        assert_eq!(tc["thinkingBudget"].as_i64().unwrap(), 0);
+    }
+
+    /// 测试未设置 reasoning_effort 时，请求体保持现有行为（thinkingConfig.includeThoughts=true）
+    #[test]
+    fn test_build_request_body_no_reasoning_effort() {
+        let adapter = create_adapter("gemini-2.5-flash", AdvancedConfig::default());
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], None);
+
+        let tc = &body["generationConfig"]["thinkingConfig"];
+        assert_eq!(tc["includeThoughts"].as_bool().unwrap(), true);
+        assert!(tc.get("thinkingBudget").is_none());
+        assert!(tc.get("thinkingLevel").is_none());
     }
 }

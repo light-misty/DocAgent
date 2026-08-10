@@ -70,6 +70,10 @@ pub struct AdvancedConfig {
     /// 与 max_tokens 不同：max_tokens 是 LLM 最大输出 token 数，context_window 是模型上下文窗口总大小
     #[serde(default)]
     pub context_window: Option<usize>,
+    /// 模型思考强度档位（如 "high"、"max"、"low" 等），None 表示跟随模型默认
+    /// 档位值由前端内置模型能力表决定（不同模型支持不同档位），此处仅存储用户选择
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 /// reasoning_in_content 默认值：true（安全默认，将思考内容折叠到 content）
@@ -88,6 +92,7 @@ impl Default for AdvancedConfig {
             extra_headers: HashMap::new(),
             reasoning_in_content: true,
             context_window: None,
+            reasoning_effort: None,
         }
     }
 }

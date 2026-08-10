@@ -311,6 +311,7 @@ pub async fn add_provider(
         model: config.model,
         advanced: crate::config::llm_config::AdvancedConfig {
             context_window: config.context_window,
+            reasoning_effort: config.reasoning_effort,
             ..Default::default()
         },
         supports_vision: config.supports_vision,
@@ -387,6 +388,10 @@ pub async fn update_provider(
     // 如果前端传入了 context_window，更新；否则保留原值
     if config.context_window.is_some() {
         advanced.context_window = config.context_window;
+    }
+    // 如果前端传入了 reasoning_effort，更新；否则保留原值（空字符串表示清除档位，恢复模型默认行为）
+    if config.reasoning_effort.is_some() {
+        advanced.reasoning_effort = config.reasoning_effort.clone().filter(|e| !e.is_empty());
     }
 
     let provider = crate::config::llm_config::LlmProvider {

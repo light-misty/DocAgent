@@ -113,6 +113,17 @@
     "selectModel": "选择模型",
     "configureModel": "配置模型"
   },
+  "modelSettings": {
+    "title": "思考强度设置",
+    "saveFailed": "保存失败：{{error}}",
+    "levels": {
+      "off": "关闭",
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "max": "最高"
+    }
+  },
   "agentMode": {
     "plan": "规划",
     "build": "构建",
@@ -907,6 +918,10 @@
         "desc": "展示当前会话的 Token 用量统计",
         "argHint": ""
       },
+      "effort": {
+        "desc": "设置当前模型的思考强度",
+        "argHint": ""
+      },
       "skills": {
         "desc": "加载一个 Skill 到智能体",
         "argHint": "Skill 名称"
@@ -936,7 +951,9 @@
       "compactNoNeed": "无需压缩（当前 {{tokens}} tokens）",
       "compactFailed": "压缩失败：{{error}}",
       "compactDone": "压缩完成（{{before}} → {{after}} tokens）",
-      "skillNotFound": "Skill 不存在: {{name}}"
+      "skillNotFound": "Skill 不存在: {{name}}",
+      "effortNoProvider": "当前没有可用的模型",
+      "effortNotSupported": "模型 {{model}} 不支持思考强度"
     },
     "stats": {
       "title": "Token 用量统计",

@@ -24,7 +24,7 @@ import { useAgentModeStore } from "./stores/useAgentModeStore";
 import { useAgent } from "./hooks/useAgent";
 import { parseError } from "./services/errorHandler";
 import { matchesShortcut } from "./utils/format";
-import type { NodeStatus } from "./types";
+import type { NodeStatus, ProviderInfo } from "./types";
 import type { UpdateInfo } from "./services/tauri";
 import { onSessionUpdated, onWorkspaceDirectoryDeleted } from "./services/event";
 import * as tauriCmd from "./services/tauri";
@@ -35,6 +35,9 @@ import { useSlashCommandStore } from "./stores/useSlashCommandStore";
 import { getCommandByName } from "./commands/slashCommands";
 import { useSuperpowersStore } from "./stores/useSuperpowersStore";
 import { BUILTIN_SUPERPOWERS_NAME, BUILTIN_SUPERPOWERS_CONTENT } from "./commands/superpowersContent";
+// 思考强度能力表与设置窗口（/effort 命令使用）
+import { resolveReasoningEfforts } from "./data/reasoningEfforts";
+import { EffortOverlay } from "./components/common/EffortOverlay";
 
 // 懒加载组件：这些组件体积较大且仅在用户打开时才需要，延迟加载可减少首屏 bundle 体积
 // 文档预览页：打开预览时替换主内容区显示，带返回按钮
@@ -124,6 +127,8 @@ export default function App() {
   // 斜杠命令 help 覆盖层控制
   const { openHelpOverlay, openStatsOverlay } = useSlashCommandStore();
   const { loadTree, clearTree, initFileChangeListener, destroyFileChangeListener } = useFileTreeStore();
+  // /effort 命令触发的思考强度设置窗口：目标 Provider，非空时显示窗口
+  const [effortProvider, setEffortProvider] = useState<ProviderInfo | null>(null);
 
   const {
     error: agentError,
@@ -1165,6 +1170,26 @@ export default function App() {
         openStatsOverlay();
         break;
       }
+      case "effort": {
+        // /effort：打开当前模型的思考强度设置窗口（与模型列表编辑按钮功能一致）
+        const s = useSettingsStore.getState();
+        const provider = s.llmProviders.find((p) => p.id === s.preferredProviderId)
+          || s.llmProviders[0];
+        if (!provider) {
+          useToastStore.getState().addToast("warning", t("slash.toast.effortNoProvider"));
+          return;
+        }
+        if (!resolveReasoningEfforts(provider.model)) {
+          useToastStore.getState().addToast(
+            "warning",
+            t("slash.toast.effortNotSupported", { model: provider.model })
+          );
+          return;
+        }
+        // 打开思考强度设置窗口（居中显示，样式与斜杠命令帮助窗口一致）
+        setEffortProvider(provider);
+        break;
+      }
       case "skills": {
         // /skills <name> 直接指定 Skill 名称
         if (_args.trim()) {
@@ -1305,6 +1330,18 @@ export default function App() {
       <SlashCommandHelp />
       {/* Token 用量统计覆盖层（由 useSlashCommandStore 控制显隐） */}
       <StatsOverlay />
+
+      {/* /effort 命令触发的思考强度设置窗口 */}
+      {effortProvider && (
+        <EffortOverlay
+          provider={effortProvider}
+          onClose={() => setEffortProvider(null)}
+          onApplied={() => {
+            // 刷新 Provider 列表，使档位变更立即生效
+            useSettingsStore.getState().loadProviders();
+          }}
+        />
+      )}
 
       {/* 全局 Toast 提示容器 */}
       <ToastContainer />

@@ -113,6 +113,17 @@
     "selectModel": "Select Model",
     "configureModel": "Configure Model"
   },
+  "modelSettings": {
+    "title": "Thinking Effort",
+    "saveFailed": "Failed to save: {{error}}",
+    "levels": {
+      "off": "Off",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "max": "Max"
+    }
+  },
   "agentMode": {
     "plan": "Plan",
     "build": "Build",
@@ -907,6 +918,10 @@
         "desc": "Show token usage statistics for current session",
         "argHint": ""
       },
+      "effort": {
+        "desc": "Set thinking effort for current model",
+        "argHint": ""
+      },
       "skills": {
         "desc": "Load a Skill into the agent",
         "argHint": "Skill name"
@@ -936,7 +951,9 @@
       "compactNoNeed": "No compaction needed (current {{tokens}} tokens)",
       "compactFailed": "Compaction failed: {{error}}",
       "compactDone": "Compaction complete ({{before}} → {{after}} tokens)",
-      "skillNotFound": "Skill not found: {{name}}"
+      "skillNotFound": "Skill not found: {{name}}",
+      "effortNoProvider": "No available model",
+      "effortNotSupported": "Model {{model}} does not support thinking effort"
     },
     "stats": {
       "title": "Token Usage Statistics",

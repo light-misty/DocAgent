@@ -32,6 +32,9 @@ pub struct ProviderConfig {
     /// 上下文窗口大小 (tokens)，None 表示使用默认值 (200K)
     #[serde(default)]
     pub context_window: Option<usize>,
+    /// 模型思考强度档位（如 "high"、"max"、"low" 等），None 表示跟随模型默认
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     /// 是否支持视觉/图片多模态
     #[serde(default = "default_supports_vision")]
     pub supports_vision: bool,
@@ -55,6 +58,9 @@ pub struct ProviderInfo {
     pub is_connected: Option<bool>,
     /// 上下文窗口大小 (tokens)，运行时计算后的最终值
     pub context_window: usize,
+    /// 模型思考强度档位（如 "high"、"max"），None 表示未设置
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     /// 是否支持视觉/图片多模态
     pub supports_vision: bool,
 }

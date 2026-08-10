@@ -263,6 +263,30 @@ impl AnthropicAdapter {
         body["temperature"] = json!(self.advanced.temperature);
         body["top_p"] = json!(self.advanced.top_p);
 
+        // 思考强度（reasoning_effort）：
+        // - 非 off 档位：发送 thinking block（budget_tokens 按档位换算），并移除 temperature/top_p
+        //   （Anthropic 开启 extended thinking 时不允许携带采样参数）
+        // - off/未设置：不发送 thinking，保留 temperature/top_p
+        if let Some(effort) = &self.advanced.reasoning_effort {
+            if effort != "off" {
+                let max_tokens = max_tokens_override.unwrap_or(self.advanced.max_tokens);
+                let budget_tokens = match effort.as_str() {
+                    "low" => 1024,
+                    "medium" => 8192,
+                    "high" => 16384,
+                    // max 档位：预算为 max_tokens - 1（必须小于输出上限）
+                    "max" => (max_tokens as u64).saturating_sub(1),
+                    _ => 8192,
+                };
+                body["thinking"] = json!({
+                    "type": "enabled",
+                    "budget_tokens": budget_tokens,
+                });
+                body.as_object_mut().unwrap().remove("temperature");
+                body.as_object_mut().unwrap().remove("top_p");
+            }
+        }
+
         body
     }
 
@@ -1437,5 +1461,128 @@ impl LlmProvider for AnthropicAdapter {
                 })
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::llm_config::AdvancedConfig;
+
+    /// 辅助函数：创建 AnthropicAdapter
+    fn create_adapter(model: &str, advanced: AdvancedConfig) -> AnthropicAdapter {
+        AnthropicAdapter::new(
+            "https://api.anthropic.com".to_string(),
+            "test-key".to_string(),
+            model.to_string(),
+            advanced,
+        )
+    }
+
+    /// 辅助函数：构造最小 user 消息
+    fn user_message(content: &str) -> ChatMessage {
+        ChatMessage {
+            role: "user".to_string(),
+            content: content.to_string(),
+            content_parts: None,
+            tool_calls: None,
+            tool_call_id: None,
+            reasoning_content: None,
+            attachments: None,
+            metadata: None,
+        }
+    }
+
+    /// 测试设置 reasoning_effort=high 时，发送 thinking block（budget_tokens=16384）并跳过 temperature/top_p
+    #[test]
+    fn test_build_request_body_thinking_high() {
+        let adapter = create_adapter(
+            "claude-sonnet-4-6",
+            AdvancedConfig {
+                reasoning_effort: Some("high".to_string()),
+                ..AdvancedConfig::default()
+            },
+        );
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], false, None);
+
+        // thinking block 应启用，且 budget_tokens 按 high→16384 换算
+        assert_eq!(body["thinking"]["type"].as_str().unwrap(), "enabled");
+        assert_eq!(body["thinking"]["budget_tokens"].as_u64().unwrap(), 16384);
+        // 开启思考时不允许携带采样参数
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("top_p").is_none());
+    }
+
+    /// 测试 reasoning_effort=low 时，budget_tokens 按 low→1024 换算
+    #[test]
+    fn test_build_request_body_thinking_low() {
+        let adapter = create_adapter(
+            "claude-opus-4-6",
+            AdvancedConfig {
+                reasoning_effort: Some("low".to_string()),
+                ..AdvancedConfig::default()
+            },
+        );
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], false, None);
+
+        assert_eq!(body["thinking"]["type"].as_str().unwrap(), "enabled");
+        assert_eq!(body["thinking"]["budget_tokens"].as_u64().unwrap(), 1024);
+    }
+
+    /// 测试 reasoning_effort=max 时，budget_tokens 按 max→max_tokens-1 换算
+    #[test]
+    fn test_build_request_body_thinking_max() {
+        let adapter = create_adapter(
+            "claude-opus-4-6",
+            AdvancedConfig {
+                reasoning_effort: Some("max".to_string()),
+                ..AdvancedConfig::default()
+            },
+        );
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], false, None);
+
+        let max_tokens = body["max_tokens"].as_u64().unwrap();
+        assert_eq!(
+            body["thinking"]["budget_tokens"].as_u64().unwrap(),
+            max_tokens - 1
+        );
+    }
+
+    /// 测试 reasoning_effort=off 时，不发送 thinking，保留 temperature/top_p
+    #[test]
+    fn test_build_request_body_thinking_off() {
+        let adapter = create_adapter(
+            "claude-sonnet-4-6",
+            AdvancedConfig {
+                reasoning_effort: Some("off".to_string()),
+                ..AdvancedConfig::default()
+            },
+        );
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], false, None);
+
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("temperature").is_some());
+        assert!(body.get("top_p").is_some());
+    }
+
+    /// 测试未设置 reasoning_effort 时，请求体保持现有行为（无 thinking，含 temperature/top_p）
+    #[test]
+    fn test_build_request_body_no_reasoning_effort() {
+        let adapter = create_adapter("claude-sonnet-4-6", AdvancedConfig::default());
+        let messages = vec![user_message("你好")];
+
+        let body = adapter.build_request_body(&messages, &[], false, None);
+
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("temperature").is_some());
+        assert!(body.get("top_p").is_some());
     }
 }

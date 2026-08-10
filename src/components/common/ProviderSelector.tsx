@@ -2,21 +2,29 @@ import { useTranslation } from 'react-i18next';
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Icon } from "./Icon";
 import { useSettingsStore } from "../../stores/useSettingsStore";
+import { useToastStore } from "../../stores/useToastStore";
+import type { ProviderInfo } from "../../types";
+import { resolveReasoningEfforts } from "../../data/reasoningEfforts";
+import { ThinkingEffortDropdown } from "./ThinkingEffortDropdown";
 
 export function ProviderSelector({ dropdownUp = false }: { dropdownUp?: boolean }) {
   const { t } = useTranslation();
-  const { llmProviders, preferredProviderId, setPreferredProviderId, openSettings } = useSettingsStore();
+  const { llmProviders, preferredProviderId, setPreferredProviderId, openSettings, loadProviders } = useSettingsStore();
   const [open, setOpen] = useState(false);
+  // 正在编辑思考强度的 Provider 及锚点位置（在按钮附近弹出下拉）
+  const [effortPicker, setEffortPicker] = useState<{ provider: ProviderInfo; anchorRect: DOMRect } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // 当前有效 Provider：优先使用用户选择，否则取列表第一个
   const currentProvider = llmProviders.find((p) => p.id === preferredProviderId)
     || llmProviders[0];
 
-  /* 点击外部关闭下拉框 */
+  /* 点击外部关闭下拉框（思考强度下拉渲染在本容器内，点击其内部不会触发） */
   const handleClickOutside = useCallback((e: MouseEvent) => {
     if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
       setOpen(false);
+      // 思考强度下拉以 fixed 定位渲染：点击空白处一并关闭
+      setEffortPicker(null);
     }
   }, []);
 
@@ -92,6 +100,29 @@ export function ProviderSelector({ dropdownUp = false }: { dropdownUp?: boolean 
                   <span className="provider-selector-item-name">{provider.name}</span>
                   <span className="provider-selector-item-model">{provider.model}</span>
                 </div>
+                {/* 思考强度编辑按钮：点击在按钮附近弹出档位下拉，模型下拉保持展开，不触发模型切换 */}
+                <button
+                  className="provider-selector-item-edit"
+                  title={t('modelSettings.title')}
+                  aria-label={t('modelSettings.title')}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // 模型不支持思考强度时提示，不打开下拉
+                    if (!resolveReasoningEfforts(provider.model)) {
+                      useToastStore.getState().addToast(
+                        "warning",
+                        t('slash.toast.effortNotSupported', { model: provider.model })
+                      );
+                      return;
+                    }
+                    setEffortPicker({
+                      provider,
+                      anchorRect: e.currentTarget.getBoundingClientRect(),
+                    });
+                  }}
+                >
+                  <Icon name="edit" size={13} />
+                </button>
                 {provider.id === currentProvider?.id && (
                   <Icon name="check" size={14} />
                 )}
@@ -112,6 +143,25 @@ export function ProviderSelector({ dropdownUp = false }: { dropdownUp?: boolean 
             </div>
           </div>
         </div>
+      )}
+
+      {effortPicker && (
+        <ThinkingEffortDropdown
+          provider={effortPicker.provider}
+          anchorRect={effortPicker.anchorRect}
+          onClose={(e) => {
+            setEffortPicker(null);
+            // 点击模型下拉内部（如其他编辑按钮）时保留模型下拉；点击空白处时一并关闭
+            if (containerRef.current && !containerRef.current.contains(e?.target as Node)) {
+              setOpen(false);
+            }
+          }}
+          onApplied={() => {
+            setEffortPicker(null);
+            // 刷新 Provider 列表，使新档位在重新打开时生效
+            loadProviders();
+          }}
+        />
       )}
 
       <style>{`
@@ -205,6 +255,24 @@ export function ProviderSelector({ dropdownUp = false }: { dropdownUp?: boolean 
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+        }
+        .provider-selector-item-edit {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 22px;
+          height: 22px;
+          border: none;
+          border-radius: var(--radius-sm);
+          background: transparent;
+          color: var(--color-text-quaternary);
+          cursor: pointer;
+          flex-shrink: 0;
+          transition: background 0.15s, color 0.15s;
+        }
+        .provider-selector-item-edit:hover {
+          background: var(--color-bg-sub);
+          color: var(--color-text-primary);
         }
         .provider-selector-item-model {
           font-size: 11px;

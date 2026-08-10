@@ -32,6 +32,8 @@ struct ProviderMeta {
     created_at: String,
     /// 上下文窗口大小 (tokens)，运行时计算后的最终值
     context_window: usize,
+    /// 模型思考强度档位（如 "high"、"max"），None 表示未设置
+    reasoning_effort: Option<String>,
     /// 是否支持视觉/图片多模态
     supports_vision: bool,
 }
@@ -70,6 +72,8 @@ impl Default for ProviderHealth {
 pub struct LlmRouter {
     /// Provider 注册表，使用 tokio RwLock 支持跨 await 持锁
     providers: RwLock<HashMap<String, Box<dyn LlmProvider>>>,
+    /// Provider ID 配置顺序（Provider 列表按此顺序返回，避免 HashMap 迭代顺序不稳定导致重排）
+    ordered_ids: Vec<String>,
     meta: HashMap<String, ProviderMeta>,
     default_id: Option<String>,
     fallback_order: Vec<String>,
@@ -84,6 +88,8 @@ impl LlmRouter {
     pub fn from_config(config: &LlmConfig) -> Self {
         let mut providers: HashMap<String, Box<dyn LlmProvider>> = HashMap::new();
         let mut meta: HashMap<String, ProviderMeta> = HashMap::new();
+        // Provider 列表顺序以配置文件中的顺序为准
+        let ordered_ids: Vec<String> = config.providers.iter().map(|p| p.id.clone()).collect();
         // 默认 Provider 取列表第一个（用于路由回退，不再有"设为默认"操作）
         let default_id = config.providers.first().map(|p| p.id.clone());
 
@@ -143,6 +149,7 @@ impl LlmRouter {
                     model: provider.model.clone(),
                     created_at: String::new(),
                     context_window: provider.resolve_context_window(),
+                    reasoning_effort: provider.advanced.reasoning_effort.clone(),
                     supports_vision: provider.supports_vision,
                 },
             );
@@ -159,6 +166,7 @@ impl LlmRouter {
 
         Self {
             providers: RwLock::new(providers),
+            ordered_ids,
             meta,
             default_id,
             fallback_order: config.fallback_order.clone(),
@@ -171,6 +179,7 @@ impl LlmRouter {
     pub fn empty() -> Self {
         Self {
             providers: RwLock::new(HashMap::new()),
+            ordered_ids: Vec::new(),
             meta: HashMap::new(),
             default_id: None,
             fallback_order: Vec::new(),
@@ -756,8 +765,10 @@ impl LlmRouter {
         // 这里使用 try_read() 避免在同步上下文中 await
         let providers = self.providers.try_read();
         match providers {
-            Ok(p) => p
-                .keys()
+            Ok(p) => self
+                .ordered_ids
+                .iter()
+                .filter(|id| p.contains_key(*id))
                 .map(|id| {
                     let m = self.meta.get(id);
                     ProviderInfo {
@@ -770,14 +781,16 @@ impl LlmRouter {
                         created_at: m.map(|m| m.created_at.clone()).unwrap_or_default(),
                         is_connected: None,
                         context_window: m.map(|m| m.context_window).unwrap_or(200_000),
+                        reasoning_effort: m.and_then(|m| m.reasoning_effort.clone()),
                         supports_vision: m.map(|m| m.supports_vision).unwrap_or(false),
                     }
                 })
                 .collect(),
             Err(_) => {
                 // 无法获取锁时，仅基于 meta 返回基本信息
-                self.meta
-                    .keys()
+                self.ordered_ids
+                    .iter()
+                    .filter(|id| self.meta.contains_key(*id))
                     .map(|id| {
                         let m = self.meta.get(id);
                         ProviderInfo {
@@ -790,6 +803,7 @@ impl LlmRouter {
                             created_at: m.map(|m| m.created_at.clone()).unwrap_or_default(),
                             is_connected: None,
                             context_window: m.map(|m| m.context_window).unwrap_or(200_000),
+                            reasoning_effort: m.and_then(|m| m.reasoning_effort.clone()),
                             supports_vision: m.map(|m| m.supports_vision).unwrap_or(false),
                         }
                     })
