@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { SlashCommand } from "../../commands/slashCommands";
 import type { SkillInfo } from "../../types";
@@ -23,6 +24,10 @@ interface SlashCommandMenuProps {
   agentRunning: boolean;
   /** 是否从上方弹出（历史会话页面为 true，新建会话页面为 false） */
   dropdownUp?: boolean;
+  /** 水平对齐方式：left 靠左（输入框输入 / 触发），right 靠右（点击按钮触发），默认 left */
+  align?: "left" | "right";
+  /** 触发菜单的锚点元素（用于 fixed 定位计算），为 null 时不渲染菜单 */
+  anchorEl: HTMLElement | null;
 }
 
 interface RenderItem {
@@ -62,10 +67,12 @@ function buildRenderItems(commands: SlashCommand[], skills: SkillInfo[]): Render
  * 本组件只负责渲染高亮状态、自动滚动以及鼠标点击交互。
  */
 export function SlashCommandMenu(props: SlashCommandMenuProps) {
-  const { commands, skills, highlightIndex, onSelect, onSkillSelect, onClose, agentRunning, dropdownUp = true } = props;
+  const { commands, skills, highlightIndex, onSelect, onSkillSelect, onClose, agentRunning, dropdownUp = true, align = "left", anchorEl } = props;
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const [ready, setReady] = useState(false);
   const superpowersEnabled = useSuperpowersStore((s) => s.enabled);
   const toggleSuperpowers = useSuperpowersStore((s) => s.toggle);
   const thinkingEnabled = useThinkingDisplayStore((s) => s.enabled);
@@ -96,10 +103,56 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
     }
   }, [highlightIndex]);
 
-  return (
+  // 根据锚点元素（fixed 定位坐标系）计算菜单位置，并防止超出视口
+  const updatePosition = useCallback(() => {
+    if (!anchorEl || !containerRef.current) return;
+    const rect = anchorEl.getBoundingClientRect();
+    // 使用 offsetWidth/offsetHeight 获取布局尺寸：
+    // 弹出动画首帧 transform: scale(0.96) 会缩放 getBoundingClientRect 的返回值，
+    // 导致菜单右边缘与触发按钮错位；offset 尺寸不受 transform 影响
+    const menuWidth = containerRef.current.offsetWidth;
+    const menuHeight = containerRef.current.offsetHeight;
+    let left = align === "right" ? rect.right - menuWidth : rect.left;
+    left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+    const top = dropdownUp ? rect.top - menuHeight - 6 : rect.bottom + 6;
+    setPosition({ top, left });
+    setReady(true);
+  }, [anchorEl, align, dropdownUp]);
+
+  useLayoutEffect(() => {
+    updatePosition();
+    // 捕获阶段监听，确保内部容器滚动时也能同步位置
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    // 内容变化（如 Skills 异步加载后加入列表）导致菜单尺寸变化时重新定位，
+    // 保证右边缘始终与触发按钮对齐
+    let observer: ResizeObserver | null = null;
+    if (containerRef.current) {
+      observer = new ResizeObserver(updatePosition);
+      observer.observe(containerRef.current);
+    }
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [updatePosition]);
+
+  // 无锚点时（应只发生在挂载瞬间）不渲染，避免在屏幕外闪现
+  if (!anchorEl) {
+    return null;
+  }
+
+  return createPortal(
     <div
       ref={containerRef}
       className={`slash-menu-container ${dropdownUp ? "slash-menu-up" : "slash-menu-down"}`}
+      style={{
+        position: "fixed",
+        top: position ? position.top : -9999,
+        left: position ? position.left : -9999,
+        visibility: ready ? "visible" : "hidden",
+      }}
       role="listbox"
       aria-label={t("slash.menu.title")}
     >
@@ -273,8 +326,6 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
           padding-left: 2px;
         }
         .slash-menu-container {
-          position: absolute;
-          left: 0;
           width: max-content;
           min-width: 320px;
           max-width: 480px;
@@ -283,18 +334,14 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
           border: 1px solid var(--color-border-light);
           border-radius: var(--radius-md);
           box-shadow: var(--shadow-lg);
-          z-index: 200;
+          z-index: 10000;
           display: flex;
           flex-direction: column;
         }
         .slash-menu-container.slash-menu-up {
-          left: auto;
-          right: 0;
-          bottom: calc(100% + 6px);
           animation: slash-menu-in-up 0.15s ease-out;
         }
         .slash-menu-container.slash-menu-down {
-          top: calc(100% + 6px);
           animation: slash-menu-in-down 0.15s ease-out;
         }
         @keyframes slash-menu-in-up {
@@ -406,6 +453,7 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
           margin-top: 1px;
         }
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 }

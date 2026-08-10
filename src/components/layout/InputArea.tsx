@@ -64,8 +64,14 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
   const [slashMenuCommands, setSlashMenuCommands] = useState<SlashCommand[]>([]);
   const [slashMenuSkills, setSlashMenuSkills] = useState<SkillInfo[]>(() => [BUILTIN_SUPERPOWERS_SKILL]);
   const [highlightIndex, setHighlightIndex] = useState(0);
+  // 菜单触发来源：true 为输入 / 触发（菜单跟随输入框定位），false 为点击按钮触发（菜单对齐按钮定位）
+  const [slashMenuFromInput, setSlashMenuFromInput] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 斜杠菜单锚点 refs：输入触发时锚定 input-relative-wrap，按钮触发时锚定对应 slash-trigger-wrap
+  const inputRelativeWrapRef = useRef<HTMLDivElement>(null);
+  const centeredSlashTriggerRef = useRef<HTMLDivElement>(null);
+  const inlineSlashTriggerRef = useRef<HTMLDivElement>(null);
   // 保存模板插入时的 focus/height 定时器，组件卸载时清理
   const templateFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const templateHeightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -156,6 +162,7 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
       if (hasItems) {
         setSlashMenuCommands(filtered);
         setHighlightIndex(0);
+        setSlashMenuFromInput(true);
         setSlashMenuOpen(true);
       } else {
         setSlashMenuOpen(false);
@@ -209,6 +216,7 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
     setSlashMenuCommands(commands);
     setSlashMenuSkills([]);
     setHighlightIndex(0);
+    setSlashMenuFromInput(false);
     // 异步获取 Skills（不阻塞菜单打开）
     const ws = workspaces.find((w) => w.id === currentWorkspaceId);
     if (ws?.path) {
@@ -492,7 +500,7 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
           : t('inputArea.configReminder.noProvider'))
     : "";
 
-  // 斜杠命令菜单公共属性（centered 与非 centered 两处渲染共用）
+  // 斜杠命令菜单公共属性（输入触发与按钮触发两处渲染共用）
   const slashMenuProps = {
     commands: slashMenuCommands,
     skills: slashMenuSkills,
@@ -508,6 +516,10 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
   };
   // 菜单渲染条件：打开且有可选项
   const slashMenuVisible = slashMenuOpen && (slashMenuCommands.length > 0 || slashMenuSkills.length > 0);
+  // 菜单锚点：输入 / 触发锚定输入框容器，按钮触发锚定对应按钮容器
+  const slashMenuAnchor = slashMenuFromInput
+    ? inputRelativeWrapRef.current
+    : (centered ? centeredSlashTriggerRef.current : inlineSlashTriggerRef.current);
 
   return (
     <div className={`input-area-wrapper ${centered ? "input-area-wrapper-centered" : ""}`} role="form" aria-label={t('inputArea.messageInput')}>
@@ -540,10 +552,10 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
           </div>
         )}
 
-        <div className="input-relative-wrap" style={{ position: "relative" }}>
-          {/* 斜杠命令选择菜单（新建会话/居中模式下从输入框下方弹出） */}
-          {centered && slashMenuVisible && (
-            <SlashCommandMenu {...slashMenuProps} dropdownUp={false} />
+        <div className="input-relative-wrap" style={{ position: "relative" }} ref={inputRelativeWrapRef}>
+          {/* 斜杠命令选择菜单（输入 / 触发）：跟随输入框定位，新建会话从下方弹出，历史会话从上方弹出 */}
+          {slashMenuFromInput && slashMenuVisible && (
+            <SlashCommandMenu {...slashMenuProps} dropdownUp={!centered} anchorEl={slashMenuAnchor} />
           )}
 
           <div
@@ -576,17 +588,24 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
 
             <div className="input-inner-bottom">
               <div className="input-inner-left">
-                {/* centered 模式下，/ 按钮放在 WorkspaceSelector 之前 */}
-                {centered && <SlashTriggerButton onClick={handleSlashTrigger} />}
+                {/* centered 模式下，/ 按钮放在 WorkspaceSelector 之前，菜单在按钮下方弹出 */}
+                {centered && (
+                  <div className="slash-trigger-wrap" ref={centeredSlashTriggerRef}>
+                    <SlashTriggerButton onClick={handleSlashTrigger} />
+                    {!slashMenuFromInput && slashMenuVisible && (
+                      <SlashCommandMenu {...slashMenuProps} dropdownUp={false} anchorEl={slashMenuAnchor} />
+                    )}
+                  </div>
+                )}
                 {centered ? <WorkspaceSelector /> : <WorkspaceGitStatus />}
               </div>
               <div className="input-inner-right">
-                {/* 非 centered 模式下，/ 按钮放在 ModeSelector 之前，菜单在按钮上方弹出 */}
+                {/* 非 centered 模式下，/ 按钮放在 ModeSelector 之前，菜单在按钮上方、右边缘对齐按钮 */}
                 {!centered && (
-                  <div className="slash-trigger-wrap">
+                  <div className="slash-trigger-wrap" ref={inlineSlashTriggerRef}>
                     <SlashTriggerButton onClick={handleSlashTrigger} />
-                    {slashMenuVisible && (
-                      <SlashCommandMenu {...slashMenuProps} dropdownUp />
+                    {!slashMenuFromInput && slashMenuVisible && (
+                      <SlashCommandMenu {...slashMenuProps} dropdownUp align="right" anchorEl={slashMenuAnchor} />
                     )}
                   </div>
                 )}
