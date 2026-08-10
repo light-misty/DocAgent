@@ -717,6 +717,39 @@
   background: var(--color-warning, #faad14);
   flex-shrink: 0;
 }
+.context-panel-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+}
+.context-panel-breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.context-panel-breakdown-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.context-panel-breakdown-name {
+  flex: 1;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+.context-panel-breakdown-value {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.context-panel-breakdown-pct {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--color-text-quaternary);
+}
 .context-panel-cache {
   display: flex;
   gap: 4px;

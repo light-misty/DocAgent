@@ -119,6 +119,23 @@ function ContextPanel() {
         <span className="context-panel-percent">{usagePercent}%</span>
       </div>
 
+      {/* 上下文占用明细：逐项展示各分类的 Token 占用，位于横条与缓存命中率之间 */}
+      <div className="context-panel-breakdown">
+        {CONTEXT_SECTIONS.map((section, i) => (
+          <div key={section.key} className="context-panel-breakdown-row">
+            <span
+              className="context-panel-breakdown-dot"
+              style={{ background: `var(${section.colorVar})` }}
+            />
+            <span className="context-panel-breakdown-name">{t(section.labelKey)}</span>
+            <span className="context-panel-breakdown-value">
+              {formatTokens(sectionTokens[i])}
+              <span className="context-panel-breakdown-pct">{sectionPcts[i].toFixed(1)}%</span>
+            </span>
+          </div>
+        ))}
+      </div>
+
       {usagePercent >= 80 && (
         <div className="context-panel-warning">
           <span className="context-panel-dot" />
