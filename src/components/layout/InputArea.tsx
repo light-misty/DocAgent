@@ -125,6 +125,20 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
     setText(newText);
     // 检测斜杠命令：以 / 开头时弹出命令菜单
     if (newText.startsWith("/")) {
+      // 提取命令名部分（/ 后到第一个空格前）
+      const afterSlash = newText.slice(1);
+      const spaceIndex = afterSlash.indexOf(" ");
+      const query = spaceIndex === -1 ? afterSlash : afterSlash.slice(0, spaceIndex);
+      const lowerQuery = query.toLowerCase();
+
+      // 命令名/技能名已完整输入且带参数（命令后为用户消息）：不再弹出命令菜单
+      const commandExact = spaceIndex !== -1 && SLASH_COMMANDS.some((cmd) => cmd.name === query);
+      const skillExact = spaceIndex !== -1 && slashMenuSkills.some((s) => s.name.toLowerCase() === lowerQuery);
+      if (commandExact || skillExact) {
+        setSlashMenuOpen(false);
+        return;
+      }
+
       const { fuzzyMatches } = matchCommand(newText);
 
       // 过滤命令
@@ -133,10 +147,6 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
         : fuzzyMatches;
 
       // 过滤 Skills
-      const afterSlash = newText.slice(1);
-      const spaceIndex = afterSlash.indexOf(" ");
-      const query = spaceIndex === -1 ? afterSlash : afterSlash.slice(0, spaceIndex);
-      const lowerQuery = query.toLowerCase();
       const filteredSkills = slashMenuSkills.filter((s) =>
         s.name.toLowerCase().includes(lowerQuery)
       );
@@ -178,7 +188,11 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
     const parsed = parseCommandArgs(text);
     const args = parsed?.args ?? "";
     onSlashCommand?.(cmd.name, args);
-    setText("");
+    // 仅当输入内容为斜杠命令（以 / 开头）时执行后清空；
+    // 若输入框为普通消息（通过 / 按钮打开菜单选择命令），保留用户已输入的内容
+    if (text.startsWith("/")) {
+      setText("");
+    }
     setSlashMenuOpen(false);
   }, [executionStatus, t, text, onSlashCommand]);
 
@@ -271,6 +285,14 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
         // 检查是否为斜杠命令
         if (text.startsWith("/")) {
           const { exactMatch, fuzzyMatches } = matchCommand(text);
+          // 命令名部分（/ 后到第一个空格前）
+          const afterSlash = text.slice(1);
+          const spaceIndex = afterSlash.indexOf(" ");
+          const commandName = spaceIndex === -1 ? afterSlash : afterSlash.slice(0, spaceIndex);
+          const lowerName = commandName.toLowerCase();
+          // 命令名/技能名已完整输入且带参数：作为"命令 + 用户消息"直接发送
+          const commandExact = spaceIndex !== -1 && SLASH_COMMANDS.some((cmd) => cmd.name === commandName);
+          const skillExact = spaceIndex !== -1 && slashMenuSkills.some((s) => s.name.toLowerCase() === lowerName);
           if (exactMatch) {
             // 精确匹配：直接执行命令
             e.preventDefault();
@@ -284,6 +306,13 @@ export function InputArea({ onSend, disabled = false, executionStatus = "idle", 
           }
           if (fuzzyMatches.length === 0) {
             // 无命令匹配，走正常发送（技能匹配也通过 App.handleSend 中的技能检测处理）
+            setSlashMenuOpen(false);
+            handleSend();
+            return;
+          }
+          if (commandExact || skillExact) {
+            // 命令名已确定、命令后为用户消息：直接发送消息
+            e.preventDefault();
             setSlashMenuOpen(false);
             handleSend();
             return;
