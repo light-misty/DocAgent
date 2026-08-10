@@ -81,6 +81,14 @@ const providerTypeLabels: Record<LLMProviderType, string> = {
   custom: "", // 自定义标签通过 t() 获取
 };
 
+// 模型模板：DeepSeek 官方仅开放 OpenAI 与 Anthropic 两种兼容格式
+const MODEL_TEMPLATES: Record<string, Partial<Record<LLMProviderType, string>>> = {
+  deepseek: {
+    openai: "https://api.deepseek.com",
+    anthropic: "https://api.deepseek.com/anthropic",
+  },
+};
+
 export function ProviderFormDialog({ mode, provider, onClose, onSaved }: ProviderFormDialogProps) {
   const { t } = useTranslation();
   const [name, setName] = useState(provider?.name ?? "");
@@ -101,11 +109,19 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // 后端/非字段级错误（显示在表单底部）
   const [error, setError] = useState<string | null>(null);
+  // 当前激活的模型模板（激活后切换服务商类型时自动联动 API Base URL）
+  const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
+  // 模型下拉列表状态
+  const [modelListOpen, setModelListOpen] = useState(false);
+  const [modelList, setModelList] = useState<string[] | null>(null);
+  const [modelListLoading, setModelListLoading] = useState(false);
+  const [modelListError, setModelListError] = useState<string | null>(null);
+  // 已获取模型列表对应的请求指纹（API 未变化时复用缓存，避免重复请求）
+  const [modelListFetchedKey, setModelListFetchedKey] = useState("");
 
-  // 校验必填字段，收集所有错误返回（测试连接不要求名称与上下文窗口）
-  const validateRequired = (includeName = true, includeContextWindow = true): Record<string, string> => {
+  // 校验必填字段，收集所有错误返回（测试连接不要求上下文窗口；服务商名称非必填，为空时保存使用模型名称兜底）
+  const validateRequired = (includeContextWindow = true): Record<string, string> => {
     const errors: Record<string, string> = {};
-    if (includeName && !name.trim()) errors.name = t('settings.providerForm.enterProviderName');
     if (!apiBase.trim()) errors.apiBase = t('settings.providerForm.enterApiBase');
     if (!model.trim()) errors.model = t('settings.providerForm.enterModelName');
     // 添加模式下 API Key 必填；编辑模式下可留空，后端会从已保存 Provider 查找
@@ -124,6 +140,58 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
     });
   };
 
+  // 应用模型模板：根据服务商类型填充对应的 API Base URL
+  const applyModelTemplate = (template: string) => {
+    setActiveTemplate(template);
+    const urls = MODEL_TEMPLATES[template];
+    if (!urls) return;
+    // DeepSeek 模板支持 OpenAI / Anthropic 两种格式，其他类型默认使用 OpenAI 格式
+    const nextType: LLMProviderType = providerType === "anthropic" ? "anthropic" : "openai";
+    setProviderType(nextType);
+    const url = urls[nextType];
+    if (url) setApiBase(url);
+    clearFieldError("apiBase");
+  };
+
+  // 切换服务商类型：模板激活时自动联动 API Base URL
+  const handleProviderTypeChange = (value: LLMProviderType) => {
+    setProviderType(value);
+    if (activeTemplate) {
+      const url = MODEL_TEMPLATES[activeTemplate]?.[value];
+      if (url) {
+        setApiBase(url);
+      } else {
+        // 模板不支持当前类型，退出模板联动
+        setActiveTemplate(null);
+      }
+    }
+    clearFieldError("apiBase");
+  };
+
+  // 点击模型名称输入框：根据 API Key 与 API Base URL 获取可用模型列表
+  const handleModelInputFocus = async () => {
+    if (modelListLoading) return;
+    setModelListOpen(true);
+    if (!apiBase.trim()) { setModelListError(t('settings.providerForm.enterApiBase')); setModelList(null); return; }
+    if (!apiKey.trim()) { setModelListError(t('settings.providerForm.enterApiKey')); setModelList(null); return; }
+    const fetchKey = `${providerType}|${apiBase.trim()}|${apiKey.trim()}`;
+    // API Key / Base URL / 类型未变化时复用已获取的列表
+    if (modelListFetchedKey === fetchKey && modelList) return;
+    setModelListLoading(true);
+    setModelListError(null);
+    try {
+      const models = await tauriCmd.listModels(apiBase.trim(), apiKey.trim(), providerType);
+      setModelList(models);
+      setModelListFetchedKey(fetchKey);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : typeof err === "string" ? err : t('settings.providerForm.fetchModelsFailed');
+      setModelListError(msg);
+      setModelList(null);
+    } finally {
+      setModelListLoading(false);
+    }
+  };
+
   // 获取服务商类型选项（含 i18n 标签）
   const providerTypeOptions = providerTypeValues.map((opt) => ({
     ...opt,
@@ -132,6 +200,9 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
 
   // 根据服务商类型显示对应的默认地址占位符（灰色提示，不自动填充）
   const apiBasePlaceholder = providerTypeValues.find((o) => o.value === providerType)?.defaultBase;
+
+  // 服务商名称非必填：为空时使用模型名称作为默认名称
+  const effectiveName = name.trim() || model.trim();
 
   const handleSave = async () => {
     const errors = validateRequired();
@@ -145,7 +216,7 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
     setError(null);
     try {
       const config = {
-        name: name.trim(),
+        name: effectiveName,
         providerType,
         apiBase: apiBase.trim(),
         apiKey: apiKey.trim(),
@@ -168,8 +239,8 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
   };
 
   const handleTest = async () => {
-    // 验证必要参数（添加和编辑模式通用，测试连接不要求名称与上下文窗口）
-    const errors = validateRequired(false, false);
+    // 验证必要参数（添加和编辑模式通用，测试连接不要求上下文窗口）
+    const errors = validateRequired(false);
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
       return;
@@ -183,7 +254,7 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
       // 始终使用 testConnectionWithConfig 传递当前表单值
       // 编辑模式下传入 providerId，后端在 API Key 为空时自动从已保存 Provider 查找
       const config = {
-        name: name.trim(),
+        name: effectiveName,
         providerType,
         apiBase: apiBase.trim(),
         apiKey: apiKey.trim(),
@@ -217,6 +288,24 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
         </div>
 
         <div className="dialog-body">
+          {mode === "add" && (
+            <div className="form-group">
+              <label className="form-label">{t('settings.providerForm.modelTemplate')}</label>
+              <div className="template-buttons">
+                {Object.keys(MODEL_TEMPLATES).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`template-btn ${activeTemplate === key ? "active" : ""}`}
+                    onClick={() => applyModelTemplate(key)}
+                  >
+                    {key === "deepseek" ? "DeepSeek" : key}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="form-group">
             <label className="form-label">{t('settings.providerForm.providerName')}</label>
             <input
@@ -235,7 +324,7 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
             <select
               className="form-select"
               value={providerType}
-              onChange={(e) => setProviderType(e.target.value as LLMProviderType)}
+              onChange={(e) => handleProviderTypeChange(e.target.value as LLMProviderType)}
             >
               {providerTypeOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -249,7 +338,7 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
               className="form-input form-input-mono"
               placeholder={apiBasePlaceholder}
               value={apiBase}
-              onChange={(e) => { setApiBase(e.target.value); clearFieldError("apiBase"); }}
+              onChange={(e) => { setApiBase(e.target.value); setActiveTemplate(null); clearFieldError("apiBase"); }}
             />
             {fieldErrors.apiBase && (
               <div className="form-field-error">{fieldErrors.apiBase}</div>
@@ -278,10 +367,36 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
               className="form-input form-input-mono"
               placeholder={t('settings.providerForm.modelNamePlaceholder')}
               value={model}
-              onChange={(e) => { setModel(e.target.value); clearFieldError("model"); }}
+              onFocus={handleModelInputFocus}
+              onBlur={() => setModelListOpen(false)}
+              onChange={(e) => { setModel(e.target.value); setModelListOpen(false); clearFieldError("model"); }}
             />
             {fieldErrors.model && (
               <div className="form-field-error">{fieldErrors.model}</div>
+            )}
+            {modelListOpen && (modelList || modelListLoading || modelListError) && (
+              <div className="model-dropdown">
+                {modelListLoading && (
+                  <div className="model-dropdown-item model-dropdown-hint">{t('settings.providerForm.fetchModelsLoading')}</div>
+                )}
+                {modelListError && (
+                  <div className="model-dropdown-item model-dropdown-error">{modelListError}</div>
+                )}
+                {modelList && modelList.length === 0 && !modelListLoading && (
+                  <div className="model-dropdown-item model-dropdown-hint">{t('settings.providerForm.modelListEmpty')}</div>
+                )}
+                {modelList?.map((m) => (
+                  <div
+                    key={m}
+                    className="model-dropdown-item"
+                    // 阻止 mousedown 触发输入框 blur，保证点击时下拉列表不提前关闭
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => { setModel(m); setModelListOpen(false); clearFieldError("model"); }}
+                  >
+                    {m}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 
@@ -474,6 +589,72 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
         .form-field-error {
           font-size: 11px;
           color: var(--color-error);
+        }
+        .template-buttons {
+          display: flex;
+          gap: 8px;
+        }
+        .template-btn {
+          padding: 6px 14px;
+          border-radius: var(--radius-sm);
+          font-size: 12px;
+          font-weight: 500;
+          background: var(--color-bg-sub);
+          color: var(--color-text-secondary);
+          border: 1px solid var(--color-border-light);
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+        .template-btn:hover {
+          background: var(--color-bg-hover);
+          color: var(--color-text-primary);
+          border-color: var(--color-border-strong);
+        }
+        .template-btn.active {
+          background: var(--color-accent-light);
+          color: var(--color-accent);
+          border-color: var(--color-accent);
+        }
+        .model-dropdown {
+          max-height: 180px;
+          overflow-y: auto;
+          scrollbar-width: none;
+          border: 1px solid var(--color-border);
+          border-radius: var(--radius-sm);
+          background: var(--color-bg-elevated);
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 4px;
+        }
+        .model-dropdown::-webkit-scrollbar {
+          display: none;
+        }
+        .model-dropdown-item {
+          padding: 6px 10px;
+          border-radius: var(--radius-xs);
+          font-size: 12px;
+          font-family: var(--font-mono);
+          color: var(--color-text-primary);
+          cursor: pointer;
+          transition: all 0.12s;
+        }
+        .model-dropdown-item:hover {
+          background: var(--color-bg-hover);
+        }
+        .model-dropdown-hint {
+          color: var(--color-text-tertiary);
+          cursor: default;
+        }
+        .model-dropdown-hint:hover {
+          background: transparent;
+        }
+        .model-dropdown-error {
+          color: var(--color-error);
+          cursor: default;
+        }
+        .model-dropdown-error:hover {
+          background: transparent;
         }
         .test-error {
           background: var(--color-error-light);

@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use reqwest::Client;
 use tauri::State;
 
 use crate::config::llm_config::{AdvancedConfig, ProviderType};
-use crate::errors::{CommandError, LLM_CONNECTION_FAILED};
+use crate::errors::{CommandError, LLM_AUTH_FAILED, LLM_CONNECTION_FAILED};
 use crate::models::llm::{ConnectionResult, ProviderConfig, ProviderInfo};
 use crate::services::llm::anthropic_adapter::AnthropicAdapter;
 use crate::services::llm::gemini_adapter::GeminiAdapter;
@@ -158,6 +159,111 @@ pub async fn test_connection_with_config(
         start.elapsed().as_millis()
     );
     Ok(result)
+}
+
+/// 根据 API Key 与 API Base URL 获取可用的模型列表
+/// OpenAI 兼容格式请求 GET {api_base}/models；Anthropic 兼容格式依次尝试
+/// {api_base}/v1/models 与 {api_base}/models（DeepSeek 官方 Anthropic 端点未文档化模型列表接口）
+#[tauri::command]
+pub async fn list_models(
+    api_base: String,
+    api_key: String,
+    provider_type: String,
+) -> Result<Vec<String>, CommandError> {
+    log::info!(
+        "获取模型列表: provider_type={}, api_base={}",
+        provider_type,
+        api_base
+    );
+
+    if api_base.trim().is_empty() {
+        return Err(CommandError::llm(
+            crate::errors::LLM_INVALID_REQUEST,
+            "请输入 API Base URL".to_string(),
+        ));
+    }
+    if api_key.trim().is_empty() {
+        return Err(CommandError::llm(
+            crate::errors::LLM_INVALID_REQUEST,
+            "请输入 API Key".to_string(),
+        ));
+    }
+
+    let base = api_base.trim_end_matches('/');
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| {
+            log::error!("创建 HTTP 客户端失败: {}", e);
+            CommandError::llm(
+                LLM_CONNECTION_FAILED,
+                format!("创建 HTTP 客户端失败: {}", e),
+            )
+        })?;
+
+    // 构造候选端点：Anthropic 兼容格式先试 /v1/models，再试 /models；其他格式直接 /models
+    let mut urls: Vec<String> = Vec::new();
+    if provider_type == "anthropic" {
+        urls.push(format!("{}/v1/models", base));
+    }
+    urls.push(format!("{}/models", base));
+
+    let mut last_error: Option<CommandError> = None;
+    for url in &urls {
+        log::info!("请求模型列表端点: {}", url);
+        let response = client
+            .get(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .send()
+            .await;
+
+        match response {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    let value: serde_json::Value = resp.json().await.map_err(|e| {
+                        log::error!("解析模型列表响应失败: {}", e);
+                        CommandError::llm(
+                            crate::errors::LLM_RESPONSE_PARSE_ERROR,
+                            format!("解析模型列表响应失败: {}", e),
+                        )
+                    })?;
+                    let models: Vec<String> = value["data"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|m| m["id"].as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    log::info!("获取模型列表成功: count={}", models.len());
+                    return Ok(models);
+                }
+                let error_body = resp.text().await.unwrap_or_default();
+                let msg = format!("API 请求失败 ({}): {}", status, error_body);
+                log::warn!("模型列表端点 {} 请求失败: {}", url, msg);
+                // 401 认证失败直接返回，不再尝试其他端点
+                if status.as_u16() == 401 {
+                    return Err(CommandError::llm(
+                        LLM_AUTH_FAILED,
+                        format!("认证失败: {}", error_body),
+                    ));
+                }
+                last_error = Some(CommandError::llm(LLM_CONNECTION_FAILED, msg));
+            }
+            Err(e) => {
+                let msg = format!("请求失败: {}", e);
+                log::warn!("模型列表端点 {} {}", url, msg);
+                last_error = Some(CommandError::llm(LLM_CONNECTION_FAILED, msg));
+            }
+        }
+    }
+
+    let err = last_error.unwrap_or_else(|| {
+        CommandError::llm(LLM_CONNECTION_FAILED, "获取模型列表失败".to_string())
+    });
+    log::error!("获取模型列表最终失败: {}", err.message);
+    Err(err)
 }
 
 /// 列出所有 LLM Provider

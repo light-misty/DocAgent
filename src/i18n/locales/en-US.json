@@ -368,6 +368,7 @@
     "providerForm": {
       "addProvider": "Add Provider",
       "editProvider": "Edit Provider",
+      "modelTemplate": "Model Template",
       "providerName": "Provider Name",
       "providerNamePlaceholder": "e.g., My GPT-4o",
       "providerType": "Provider Type",
@@ -397,6 +398,9 @@
       "enterModelName": "Please enter model name",
       "enterApiKey": "Please enter API Key",
       "enterContextWindow": "Please enter context window size",
+      "fetchModelsLoading": "Fetching model list...",
+      "fetchModelsFailed": "Failed to fetch models",
+      "modelListEmpty": "No models available",
       "typeCustom": "Custom"
     },
     "addWorkspace": {
