@@ -360,7 +360,6 @@
       "delete": "删除",
       "available": "可用",
       "unavailable": "不可用",
-      "connectionSuccess": "连接成功！延迟: {{latency}}ms",
       "connectionSuccessWithModel": "连接成功！延迟: {{latency}}ms\n模型: {{model}}",
       "connectionFailed": "连接失败: {{error}}",
       "connectionError": "连接测试出错: {{error}}"
@@ -393,7 +392,6 @@
       "saving": "保存中...",
       "saveFailed": "保存失败",
       "connectionTestFailed": "连接测试失败",
-      "enterProviderName": "请输入服务商名称",
       "enterApiBase": "请输入 API Base URL",
       "enterModelName": "请输入模型名称",
       "enterApiKey": "请输入 API Key",

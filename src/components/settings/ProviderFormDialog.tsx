@@ -48,8 +48,6 @@ function formatContextWindow(value: number | undefined): string {
 
 /** 常用上下文窗口大小预设 */
 const CONTEXT_PRESETS = [
-  { label: "8K", value: 8192 },
-  { label: "32K", value: 32768 },
   { label: "128K", value: 128000 },
   { label: "200K", value: 200000 },
   { label: "400K", value: 400000 },
@@ -142,9 +140,9 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
 
   // 应用模型模板：根据服务商类型填充对应的 API Base URL
   const applyModelTemplate = (template: string) => {
-    setActiveTemplate(template);
     const urls = MODEL_TEMPLATES[template];
     if (!urls) return;
+    setActiveTemplate(template);
     // DeepSeek 模板支持 OpenAI / Anthropic 两种格式，其他类型默认使用 OpenAI 格式
     const nextType: LLMProviderType = providerType === "anthropic" ? "anthropic" : "openai";
     setProviderType(nextType);
@@ -282,12 +280,8 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-overlay z-[400] flex items-center justify-center animate-fade-in"
-    >
-      <div
-        className="dialog-modal"
-      >
+    <div className="fixed inset-0 bg-overlay z-[400] flex items-center justify-center animate-fade-in">
+      <div className="dialog-modal">
         <div className="dialog-header">
           <h3 className="dialog-title">
             {mode === "add" ? t('settings.providerForm.addProvider') : t('settings.providerForm.editProvider')}
@@ -322,9 +316,6 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
               value={name}
               onChange={(e) => { setName(e.target.value); clearFieldError("name"); }}
             />
-            {fieldErrors.name && (
-              <div className="form-field-error">{fieldErrors.name}</div>
-            )}
           </div>
 
           <div className="form-group">

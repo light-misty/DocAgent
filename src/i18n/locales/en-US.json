@@ -360,7 +360,6 @@
       "delete": "Delete",
       "available": "Available",
       "unavailable": "Unavailable",
-      "connectionSuccess": "Connection successful! Latency: {{latency}}ms",
       "connectionSuccessWithModel": "Connection successful! Latency: {{latency}}ms\nModel: {{model}}",
       "connectionFailed": "Connection failed: {{error}}",
       "connectionError": "Connection test error: {{error}}"
@@ -393,7 +392,6 @@
       "saving": "Saving...",
       "saveFailed": "Save failed",
       "connectionTestFailed": "Connection test failed",
-      "enterProviderName": "Please enter provider name",
       "enterApiBase": "Please enter API Base URL",
       "enterModelName": "Please enter model name",
       "enterApiKey": "Please enter API Key",
