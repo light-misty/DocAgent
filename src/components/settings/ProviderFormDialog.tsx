@@ -161,8 +161,8 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
       if (url) {
         setApiBase(url);
       } else {
-        // 模板不支持当前类型，退出模板联动
-        setActiveTemplate(null);
+        // 模板不支持当前类型：清空 API Base URL，保留模板联动，切回支持类型时自动恢复
+        setApiBase("");
       }
     }
     clearFieldError("apiBase");
