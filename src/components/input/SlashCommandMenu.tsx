@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { SlashCommand } from "../../commands/slashCommands";
 import type { SkillInfo } from "../../types";
 import { useSuperpowersStore } from "../../stores/useSuperpowersStore";
+import { useThinkingDisplayStore } from "../../stores/useThinkingDisplayStore";
 import { BUILTIN_SUPERPOWERS_NAME } from "../../commands/superpowersContent";
 
 interface SlashCommandMenuProps {
@@ -67,6 +68,8 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
   const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
   const superpowersEnabled = useSuperpowersStore((s) => s.enabled);
   const toggleSuperpowers = useSuperpowersStore((s) => s.toggle);
+  const thinkingEnabled = useThinkingDisplayStore((s) => s.enabled);
+  const toggleThinkingDisplay = useThinkingDisplayStore((s) => s.toggle);
 
   const renderItems = buildRenderItems(commands, skills);
 
@@ -164,6 +167,8 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
               const cmd = item.cmd;
               const isHighlighted = idx === highlightIndex;
               const isDisabled = agentRunning && !cmd.allowedInAgent;
+              // 开关型命令（thinking）：以滑块开关形式展示，点击本体直接切换
+              const isToggleCommand = cmd.name === "thinking";
               return (
                 <div
                   key={cmd.name}
@@ -175,12 +180,35 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     if (isDisabled) return;
+                    if (isToggleCommand) {
+                      toggleThinkingDisplay();
+                      return;
+                    }
                     onSelect(cmd);
                   }}
                 >
                   <div className="slash-menu-item-row">
                     <div className="slash-menu-item-name">/{cmd.name}</div>
                     <div className="slash-menu-item-desc">{t(cmd.description)}</div>
+                    {isToggleCommand && (
+                      <button
+                        className={`superpowers-toggle ${thinkingEnabled ? "superpowers-toggle-on" : ""}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          toggleThinkingDisplay();
+                        }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                        title={t(thinkingEnabled ? "slash.thinking.disable" : "slash.thinking.enable")}
+                      >
+                        <div className="superpowers-toggle-track">
+                          <div className="superpowers-toggle-thumb" />
+                        </div>
+                      </button>
+                    )}
                   </div>
                   {cmd.requiresArgs && (
                     <div className="slash-menu-item-usage">{cmd.usage}</div>

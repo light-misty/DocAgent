@@ -70,6 +70,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     allowedInAgent: false,
     requiresArgs: false,
   },
+  {
+    name: "thinking",
+    description: "slash.commands.thinking.desc",
+    usage: "/thinking",
+    allowedInAgent: true,
+    requiresArgs: false,
+  },
 ];
 
 /**

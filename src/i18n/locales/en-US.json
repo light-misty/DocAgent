@@ -925,6 +925,10 @@
         "desc": "Set thinking effort for current model",
         "argHint": ""
       },
+      "thinking": {
+        "desc": "Control auto-expand behavior of thinking process tags",
+        "argHint": ""
+      },
       "skills": {
         "desc": "Load a Skill into the agent",
         "argHint": "Skill name"
@@ -956,7 +960,9 @@
       "compactDone": "Compaction complete ({{before}} → {{after}} tokens)",
       "skillNotFound": "Skill not found: {{name}}",
       "effortNoProvider": "No available model",
-      "effortNotSupported": "Model {{model}} does not support thinking effort"
+      "effortNotSupported": "Model {{model}} does not support thinking effort",
+      "thinkingOn": "Auto-expand for thinking process enabled",
+      "thinkingOff": "Auto-expand for thinking process disabled"
     },
     "stats": {
       "title": "Token Usage Statistics",
@@ -981,6 +987,10 @@
       "disable": "Disable Superpowers Skill auto-load",
       "hintOn": "Superpowers enabled - sessions will auto-load the Superpowers framework",
       "hintOff": "Enable to auto-load the Superpowers development framework"
+    },
+    "thinking": {
+      "enable": "Enable auto-expand for thinking process",
+      "disable": "Disable auto-expand for thinking process"
     }
   }
 }

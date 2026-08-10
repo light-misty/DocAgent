@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkflowNode, ThinkingNodeData } from "../../types";
+import { useThinkingDisplayStore } from "../../stores/useThinkingDisplayStore";
 import { Icon } from "../common/Icon";
 
 interface ThinkingNodeProps {
@@ -11,15 +12,22 @@ export function ThinkingNode({ node }: ThinkingNodeProps) {
   const { t } = useTranslation();
   const data = node.data as ThinkingNodeData;
   const isStreaming = data.isStreaming || node.status === "running";
-  const [expanded, setExpanded] = useState(isStreaming);
+  // 思考过程自动展开开关：开启时遵循默认展示效果，关闭时始终折叠（可手动展开）
+  const autoExpandEnabled = useThinkingDisplayStore((s) => s.enabled);
+  const [expanded, setExpanded] = useState(autoExpandEnabled && isStreaming);
 
   useEffect(() => {
+    if (!autoExpandEnabled) {
+      // 关闭模式：始终折叠，用户可手动展开/折叠
+      setExpanded(false);
+      return;
+    }
     if (isStreaming) {
       setExpanded(true);
     } else if (node.status === "completed") {
       setExpanded(false);
     }
-  }, [isStreaming, node.status]);
+  }, [isStreaming, node.status, autoExpandEnabled]);
 
   return (
     <div className="wf-node">

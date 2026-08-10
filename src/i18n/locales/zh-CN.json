@@ -925,6 +925,10 @@
         "desc": "设置当前模型的思考强度",
         "argHint": ""
       },
+      "thinking": {
+        "desc": "控制思考过程标签的自动展开行为",
+        "argHint": ""
+      },
       "skills": {
         "desc": "加载一个 Skill 到智能体",
         "argHint": "Skill 名称"
@@ -956,7 +960,9 @@
       "compactDone": "压缩完成（{{before}} → {{after}} tokens）",
       "skillNotFound": "Skill 不存在: {{name}}",
       "effortNoProvider": "当前没有可用的模型",
-      "effortNotSupported": "模型 {{model}} 不支持思考强度"
+      "effortNotSupported": "模型 {{model}} 不支持思考强度",
+      "thinkingOn": "思考过程自动展开已开启",
+      "thinkingOff": "思考过程自动展开已关闭"
     },
     "stats": {
       "title": "Token 用量统计",
@@ -981,6 +987,10 @@
       "disable": "禁用 Superpowers Skill 自动加载",
       "hintOn": "Superpowers 已启用，会话将自动加载 Superpowers 框架",
       "hintOff": "开启后新消息将自动加载 Superpowers 开发框架"
+    },
+    "thinking": {
+      "enable": "开启思考过程自动展开",
+      "disable": "关闭思考过程自动展开"
     }
   }
 }

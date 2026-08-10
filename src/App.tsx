@@ -34,6 +34,7 @@ import { StatsOverlay } from "./components/input/StatsOverlay";
 import { useSlashCommandStore } from "./stores/useSlashCommandStore";
 import { getCommandByName } from "./commands/slashCommands";
 import { useSuperpowersStore } from "./stores/useSuperpowersStore";
+import { useThinkingDisplayStore } from "./stores/useThinkingDisplayStore";
 import { BUILTIN_SUPERPOWERS_NAME, BUILTIN_SUPERPOWERS_CONTENT } from "./commands/superpowersContent";
 // 思考强度能力表与设置窗口（/effort 命令使用）
 import { resolveReasoningEfforts } from "./data/reasoningEfforts";
@@ -1188,6 +1189,13 @@ export default function App() {
         }
         // 打开思考强度设置窗口（居中显示，样式与斜杠命令帮助窗口一致）
         setEffortProvider(provider);
+        break;
+      }
+      case "thinking": {
+        // /thinking：切换思考过程标签的自动展开行为
+        const store = useThinkingDisplayStore.getState();
+        store.setEnabled(!store.enabled);
+        useToastStore.getState().addToast("info", t(store.enabled ? "slash.toast.thinkingOn" : "slash.toast.thinkingOff"));
         break;
       }
       case "skills": {
