@@ -396,6 +396,7 @@
       "enterApiBase": "Please enter API Base URL",
       "enterModelName": "Please enter model name",
       "enterApiKey": "Please enter API Key",
+      "enterContextWindow": "Please enter context window size",
       "typeCustom": "Custom"
     },
     "addWorkspace": {

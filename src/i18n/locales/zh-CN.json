@@ -396,6 +396,7 @@
       "enterApiBase": "请输入 API Base URL",
       "enterModelName": "请输入模型名称",
       "enterApiKey": "请输入 API Key",
+      "enterContextWindow": "请输入上下文窗口大小",
       "typeCustom": "自定义"
     },
     "addWorkspace": {

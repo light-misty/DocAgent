@@ -97,7 +97,32 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionResult | null>(null);
+  // 字段级验证错误（显示在对应输入框下方）
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // 后端/非字段级错误（显示在表单底部）
   const [error, setError] = useState<string | null>(null);
+
+  // 校验必填字段，收集所有错误返回（测试连接不要求名称与上下文窗口）
+  const validateRequired = (includeName = true, includeContextWindow = true): Record<string, string> => {
+    const errors: Record<string, string> = {};
+    if (includeName && !name.trim()) errors.name = t('settings.providerForm.enterProviderName');
+    if (!apiBase.trim()) errors.apiBase = t('settings.providerForm.enterApiBase');
+    if (!model.trim()) errors.model = t('settings.providerForm.enterModelName');
+    // 添加模式下 API Key 必填；编辑模式下可留空，后端会从已保存 Provider 查找
+    if (mode === "add" && !apiKey.trim()) errors.apiKey = t('settings.providerForm.enterApiKey');
+    if (includeContextWindow && !contextWindow.trim()) errors.contextWindow = t('settings.providerForm.enterContextWindow');
+    return errors;
+  };
+
+  // 输入时清除对应字段的错误提示
+  const clearFieldError = (field: string) => {
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
 
   // 获取服务商类型选项（含 i18n 标签）
   const providerTypeOptions = providerTypeValues.map((opt) => ({
@@ -109,12 +134,14 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
   const apiBasePlaceholder = providerTypeValues.find((o) => o.value === providerType)?.defaultBase;
 
   const handleSave = async () => {
-    if (!name.trim()) { setError(t('settings.providerForm.enterProviderName')); return; }
-    if (!apiBase.trim()) { setError(t('settings.providerForm.enterApiBase')); return; }
-    if (!model.trim()) { setError(t('settings.providerForm.enterModelName')); return; }
-    if (mode === "add" && !apiKey.trim()) { setError(t('settings.providerForm.enterApiKey')); return; }
+    const errors = validateRequired();
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      return;
+    }
 
     setSaving(true);
+    setFieldErrors({});
     setError(null);
     try {
       const config = {
@@ -141,23 +168,16 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
   };
 
   const handleTest = async () => {
-    // 验证必要参数（添加和编辑模式通用）
-    if (!apiBase.trim()) {
-      setError(t('settings.providerForm.enterApiBase'));
-      return;
-    }
-    if (!model.trim()) {
-      setError(t('settings.providerForm.enterModelName'));
-      return;
-    }
-    // 添加模式下 API Key 必填；编辑模式下可留空，后端会从已保存 Provider 查找
-    if (mode === "add" && !apiKey.trim()) {
-      setError(t('settings.providerForm.enterApiKey'));
+    // 验证必要参数（添加和编辑模式通用，测试连接不要求名称与上下文窗口）
+    const errors = validateRequired(false, false);
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
 
     setTesting(true);
     setTestResult(null);
+    setFieldErrors({});
     setError(null);
     try {
       // 始终使用 testConnectionWithConfig 传递当前表单值
@@ -203,8 +223,11 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
               className="form-input"
               placeholder={t('settings.providerForm.providerNamePlaceholder')}
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => { setName(e.target.value); clearFieldError("name"); }}
             />
+            {fieldErrors.name && (
+              <div className="form-field-error">{fieldErrors.name}</div>
+            )}
           </div>
 
           <div className="form-group">
@@ -226,8 +249,11 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
               className="form-input form-input-mono"
               placeholder={apiBasePlaceholder}
               value={apiBase}
-              onChange={(e) => setApiBase(e.target.value)}
+              onChange={(e) => { setApiBase(e.target.value); clearFieldError("apiBase"); }}
             />
+            {fieldErrors.apiBase && (
+              <div className="form-field-error">{fieldErrors.apiBase}</div>
+            )}
           </div>
 
           <div className="form-group">
@@ -237,10 +263,13 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
             <input
               type="password"
               className="form-input form-input-mono"
-              placeholder={mode === "edit" ? "sk-..." : "sk-..."}
+              placeholder="sk-..."
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => { setApiKey(e.target.value); clearFieldError("apiKey"); }}
             />
+            {fieldErrors.apiKey && (
+              <div className="form-field-error">{fieldErrors.apiKey}</div>
+            )}
           </div>
 
           <div className="form-group">
@@ -249,8 +278,11 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
               className="form-input form-input-mono"
               placeholder={t('settings.providerForm.modelNamePlaceholder')}
               value={model}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={(e) => { setModel(e.target.value); clearFieldError("model"); }}
             />
+            {fieldErrors.model && (
+              <div className="form-field-error">{fieldErrors.model}</div>
+            )}
           </div>
 
           <div className="form-group">
@@ -262,15 +294,18 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
               type="text"
               placeholder={t('settings.providerForm.contextWindowPlaceholder')}
               value={contextWindow}
-              onChange={(e) => setContextWindow(e.target.value)}
+              onChange={(e) => { setContextWindow(e.target.value); clearFieldError("contextWindow"); }}
             />
+            {fieldErrors.contextWindow && (
+              <div className="form-field-error">{fieldErrors.contextWindow}</div>
+            )}
             <div className="context-presets">
               {CONTEXT_PRESETS.map((preset) => (
                 <button
                   key={preset.label}
                   type="button"
                   className={`context-preset-btn ${contextWindow === preset.label ? "active" : ""}`}
-                  onClick={() => setContextWindow(preset.label)}
+                  onClick={() => { setContextWindow(preset.label); clearFieldError("contextWindow"); }}
                 >
                   {preset.label}
                 </button>
@@ -330,6 +365,7 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
       <style>{`
         .dialog-modal {
           width: 520px;
+          max-height: 90vh;
           background: var(--color-bg-elevated);
           border-radius: var(--radius-xl);
           box-shadow: var(--shadow-xl);
@@ -369,11 +405,16 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
         }
         .dialog-body {
           flex: 1;
+          min-height: 0;
           overflow-y: auto;
+          scrollbar-width: none;
           padding: 20px 24px;
           display: flex;
           flex-direction: column;
           gap: 16px;
+        }
+        .dialog-body::-webkit-scrollbar {
+          display: none;
         }
         .form-group {
           display: flex;
@@ -429,6 +470,10 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
           background: var(--color-success-light);
           color: var(--color-success);
           border: 1px solid var(--color-success-bg);
+        }
+        .form-field-error {
+          font-size: 11px;
+          color: var(--color-error);
         }
         .test-error {
           background: var(--color-error-light);
