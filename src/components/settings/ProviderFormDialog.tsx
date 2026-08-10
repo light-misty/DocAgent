@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from 'react-i18next';
-import type { ProviderInfo, LLMProviderType, ConnectionResult } from "../../types";
+import type { ProviderInfo, LLMProviderType } from "../../types";
 import * as tauriCmd from "../../services/tauri";
+import { useToastStore } from "../../stores/useToastStore";
 
 /** 将人类可读格式(如 "128K", "1M")解析为数字 */
 function parseContextWindow(value: string): number | undefined {
@@ -104,7 +105,6 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
   );
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<ConnectionResult | null>(null);
   // 字段级验证错误（显示在对应输入框下方）
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // 后端/非字段级错误（显示在表单底部）
@@ -247,7 +247,6 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
     }
 
     setTesting(true);
-    setTestResult(null);
     setFieldErrors({});
     setError(null);
     try {
@@ -264,10 +263,19 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
       };
       const providerId = mode === "edit" ? provider?.id : undefined;
       const result = await tauriCmd.testConnectionWithConfig(config, providerId);
-      setTestResult(result);
+      // 测试连接结果通过右上角 Toast 展示
+      if (result.success) {
+        const msg = result.model
+          ? t('settings.providerForm.testConnectionSuccessWithModel', { latency: result.latencyMs, model: result.model })
+          : t('settings.providerForm.testConnectionSuccess', { latency: result.latencyMs });
+        useToastStore.getState().addToast("success", msg);
+      } else {
+        const msg = t('settings.providerForm.testConnectionFailed', { error: result.errorMessage || result.error || t('settings.providerForm.unknownError') });
+        useToastStore.getState().addToast("error", msg);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : typeof err === "string" ? err : t('settings.providerForm.connectionTestFailed');
-      setTestResult({ success: false, latencyMs: 0, errorMessage: msg, error: msg });
+      useToastStore.getState().addToast("error", t('settings.providerForm.testConnectionFailed', { error: msg }));
     } finally {
       setTesting(false);
     }
@@ -442,16 +450,6 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
             </select>
           </div>
 
-          {testResult && (
-            <div className={`test-result ${testResult.success ? "test-success" : "test-error"}`}>
-              {testResult.success ? (
-                <span>{testResult.model ? t('settings.providerForm.testConnectionSuccessWithModel', { latency: testResult.latencyMs, model: testResult.model }) : t('settings.providerForm.testConnectionSuccess', { latency: testResult.latencyMs })}</span>
-              ) : (
-                <span>{t('settings.providerForm.testConnectionFailed', { error: testResult.errorMessage || testResult.error || t('settings.providerForm.unknownError') })}</span>
-              )}
-            </div>
-          )}
-
           {error && (
             <div className="test-result test-error">{error}</div>
           )}
@@ -580,11 +578,6 @@ export function ProviderFormDialog({ mode, provider, onClose, onSaved }: Provide
           padding: 8px 12px;
           border-radius: var(--radius-sm);
           font-size: 12px;
-        }
-        .test-success {
-          background: var(--color-success-light);
-          color: var(--color-success);
-          border: 1px solid var(--color-success-bg);
         }
         .form-field-error {
           font-size: 11px;

@@ -7,6 +7,7 @@ import { ProviderFormDialog } from "./ProviderFormDialog";
 import { DeleteConfirmDialog } from "../common/DeleteConfirmDialog";
 import type { ProviderInfo } from "../../types";
 import * as tauriCmd from "../../services/tauri";
+import { useToastStore } from "../../stores/useToastStore";
 
 export function LLMConfigTab() {
   const { t } = useTranslation();
@@ -31,13 +32,14 @@ export function LLMConfigTab() {
     setTestingId(providerId);
     try {
       const result = await tauriCmd.testConnection(providerId);
+      // 测试连接结果通过右上角 Toast 展示
       if (result.success) {
-        alert(t('settings.llm.connectionSuccessWithModel', { latency: result.latencyMs, model: result.model || '' }));
+        useToastStore.getState().addToast("success", t('settings.llm.connectionSuccessWithModel', { latency: result.latencyMs, model: result.model || '' }));
       } else {
-        alert(t('settings.llm.connectionFailed', { error: result.errorMessage || result.error || t('settings.providerForm.unknownError') }));
+        useToastStore.getState().addToast("error", t('settings.llm.connectionFailed', { error: result.errorMessage || result.error || t('settings.providerForm.unknownError') }));
       }
     } catch (err) {
-      alert(t('settings.llm.connectionError', { error: String(err) }));
+      useToastStore.getState().addToast("error", t('settings.llm.connectionError', { error: String(err) }));
     } finally {
       setTestingId(null);
     }
