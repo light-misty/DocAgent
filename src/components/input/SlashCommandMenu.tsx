@@ -295,9 +295,9 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
           opacity: 0.9;
         }
         .superpowers-toggle-track {
-          width: 32px;
-          height: 18px;
-          border-radius: 10px;
+          width: 24px;
+          height: 13px;
+          border-radius: 7px;
           background: var(--color-border-strong);
           position: relative;
           transition: background 0.2s;
@@ -306,8 +306,8 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
           background: var(--color-accent, #3b82f6);
         }
         .superpowers-toggle-thumb {
-          width: 14px;
-          height: 14px;
+          width: 9px;
+          height: 9px;
           border-radius: 50%;
           background: white;
           position: absolute;
@@ -317,7 +317,7 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
           box-shadow: 0 1px 2px rgba(0,0,0,0.2);
         }
         .superpowers-toggle-on .superpowers-toggle-thumb {
-          transform: translateX(14px);
+          transform: translateX(11px);
         }
         .slash-menu-superpowers-hint {
           font-size: 10px;
@@ -395,7 +395,7 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
         }
         .slash-menu-divider {
           height: 1px;
-          background: var(--color-border-light);
+          background: var(--color-border);
           margin: 3px 8px;
         }
         .slash-menu-empty {
@@ -425,7 +425,7 @@ export function SlashCommandMenu(props: SlashCommandMenuProps) {
         }
         .slash-menu-item-row {
           display: flex;
-          align-items: baseline;
+          align-items: center;
           gap: 10px;
         }
         .slash-menu-item-name {
