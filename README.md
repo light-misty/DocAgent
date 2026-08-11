@@ -31,21 +31,20 @@ Download the latest Windows installer from [Releases](https://github.com/light-m
 - Extensible Skill system for loading custom capabilities
 - Built-in Superpowers skill development workflow framework
 - Multi-turn conversational operations
-- Real-time streaming of AI thoughts and results
-- Visual workflow timeline showing each step
-- Live code execution preview
+- Visual context token breakdown to track token usage
+- Slash command system: type or click the `/` button to open the command menu (help, compact, retry, stop, new, stats, effort, thinking, etc.)
 
 ### Multiple AI Models
 - OpenAI-compatible API, Anthropic Claude, Google Gemini, Ollama local models
 - Custom API endpoint support
 - Health monitoring with auto-recovery
 - Real-time token usage tracking
+- Reasoning effort (thinking intensity) presets tuned per model
 
 ### Workspace Management
 - Multiple workspaces mapped to local directories
 - File tree browsing and search
 - Create, delete, rename files within workspaces
-- Auto-detection when directories are deleted
 - Git repository status display
 
 ### Document Processing (Document Mode)
@@ -56,14 +55,10 @@ Download the latest Windows installer from [Releases](https://github.com/light-m
 - Markdown / Plain Text: read and convert
 - Markdown preview supports internal links, math formulas, and emoji rendering
 - Markdown preview supports loading images from local relative paths
-- Document preview refactored into independent page mode with improved multi-format support
 
 ### Session Management
-- Switch between multiple sessions
-- AI continues running in background after switching
-- Auto-generated session titles
+- Multiple session switching without interference, with Agent background running support
 - Session todo tasks
-- Session list pagination for large history
 - Version snapshot and message rollback: automatic file snapshots before each message, rollback to any historical message node (with code files restored), undo rollback supported, auto-cleanup of session on full rollback
 
 ### Prompt Templates
@@ -75,7 +70,5 @@ Download the latest Windows installer from [Releases](https://github.com/light-m
 - Dark / Light / System theme
 - Chinese / English interface
 - Global shortcuts (Ctrl+N new session, Ctrl+W close, Ctrl+B sidebar, Ctrl+, settings)
-- File attachment upload (images, documents, text)
-- Image file preview with zoom support
+- Multimodal conversations, including attachments such as images and documents
 - Automatic update detection and installation
-
