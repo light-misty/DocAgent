@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { memo, useState, useRef, useCallback } from "react";
 import { useTranslation } from 'react-i18next';
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
@@ -21,6 +21,8 @@ interface MarkdownPreviewProps {
   baseDir?: string;
   /** 点击相对路径文件链接时的回调（参数为链接原始 href） */
   onOpenLink?: (href: string) => void;
+  /** 流式输出中：跳过代码高亮/公式渲染等重型插件，降低逐帧解析开销，结束后自动完整渲染 */
+  streaming?: boolean;
 }
 
 // 外部链接（http/https/mailto）用系统默认浏览器打开
@@ -88,11 +90,16 @@ function CodeBlock({
   );
 }
 
-export function MarkdownPreview({
+/**
+ * Markdown 预览组件（React.memo 包装：content 等 props 未变化时跳过重渲染，
+ * 避免流式更新期间其他无关重渲染触发重复的 markdown 全量解析）
+ */
+export const MarkdownPreview = memo(function MarkdownPreview({
   content,
   className = "",
   baseDir,
   onOpenLink,
+  streaming = false,
 }: MarkdownPreviewProps) {
   return (
     <>
@@ -102,7 +109,13 @@ export function MarkdownPreview({
           remarkPlugins={[remarkGfm, remarkMath, remarkEmoji]}
           // rehype-raw 将 Markdown 内嵌的 HTML 标签（如 <div align="center">、<img>）解析为真实元素渲染；
           // rehype-slug 为标题生成锚点 id，配合下方 a 组件实现目录跳转
-          rehypePlugins={[rehypeRaw, rehypeSlug, rehypeKatex, rehypeHighlight]}
+          // 流式输出中跳过 rehypeKatex/rehypeHighlight 等重型插件（代码块不完整时高亮开销大且闪烁），
+          // 流式结束后自动切换为完整渲染
+          rehypePlugins={
+            streaming
+              ? [rehypeRaw, rehypeSlug]
+              : [rehypeRaw, rehypeSlug, rehypeKatex, rehypeHighlight]
+          }
           components={{
             // 代码块：包装为带标题栏的容器
             pre: CodeBlock,
@@ -178,7 +191,7 @@ export function MarkdownPreview({
       <style>{markdownStyles}</style>
     </>
   );
-}
+});
 
 // Markdown 预览样式
 const markdownStyles = `

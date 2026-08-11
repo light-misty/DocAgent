@@ -74,7 +74,11 @@ function throttle<T extends (...args: any[]) => void>(fn: T, delay: number): T {
  */
 export function WorkflowTimeline({ onRetryError, typewriterKey }: WorkflowTimelineProps) {
   const { t } = useTranslation();
-  const { nodes, registerNodeRef, unregisterNodeRef, revertInfo } = useWorkflowStore();
+  // 细粒度订阅：仅订阅本组件实际使用的 store 字段，避免其他字段更新触发时间线重渲染
+  const nodes = useWorkflowStore((s) => s.nodes);
+  const registerNodeRef = useWorkflowStore((s) => s.registerNodeRef);
+  const unregisterNodeRef = useWorkflowStore((s) => s.unregisterNodeRef);
+  const revertInfo = useWorkflowStore((s) => s.revertInfo);
   const executionStatus = useWorkflowStore((s) => s.executionStatus);
   const isAgentRunning = executionStatus === "running";
   // 撤销回退进行中状态
@@ -88,6 +92,26 @@ export function WorkflowTimeline({ onRetryError, typewriterKey }: WorkflowTimeli
   const isProgrammaticScrollRef = useRef(false);
   // 追踪上一次节点数量，用于判断是会话切换还是增量更新
   const prevNodesLengthRef = useRef(nodes.length);
+  // 每个节点一个稳定的 ref 回调（存入 Map 复用，不随渲染重建），
+  // 使 React.memo 在节点未变化时能跳过 WorkflowNodeRenderer 的重渲染
+  const nodeRefCallbacksRef = useRef(new Map<string, (el: HTMLElement | null) => void>());
+  const getNodeRef = useCallback(
+    (nodeId: string) => {
+      let callback = nodeRefCallbacksRef.current.get(nodeId);
+      if (!callback) {
+        callback = (el) => {
+          if (el) {
+            registerNodeRef(nodeId, el);
+          } else {
+            unregisterNodeRef(nodeId);
+          }
+        };
+        nodeRefCallbacksRef.current.set(nodeId, callback);
+      }
+      return callback;
+    },
+    [registerNodeRef, unregisterNodeRef]
+  );
 
   // 计算流式内容变化标识：当流式节点的文本内容增长时，此值变化
   const streamingContentKey = nodes.reduce((acc, node) => {
@@ -289,13 +313,7 @@ export function WorkflowTimeline({ onRetryError, typewriterKey }: WorkflowTimeli
             key={node.id}
             node={node}
             onRetry={onRetryError}
-            nodeRef={(el) => {
-              if (el) {
-                registerNodeRef(node.id, el);
-              } else {
-                unregisterNodeRef(node.id);
-              }
-            }}
+            nodeRef={getNodeRef(node.id)}
           />
         ))}
       </div>

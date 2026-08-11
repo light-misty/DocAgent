@@ -5,6 +5,7 @@ import { MarkdownPreview } from "../preview/MarkdownPreview";
 import { Icon } from "../common/Icon";
 import { copyToClipboard } from "../../utils/clipboard";
 import { useWorkflowStore } from "../../stores/useWorkflowStore";
+import { useSmoothStreamingText } from "../../hooks/useSmoothStreamingText";
 
 interface ContentNodeProps {
   node: WorkflowNode<"content">;
@@ -15,6 +16,9 @@ export function ContentNode({ node, hideCopy }: ContentNodeProps) {
   const { t } = useTranslation();
   const data = node.data as ContentNodeData;
   const isCompleted = node.status === "completed" && !data.isStreaming;
+  // 流式节点启用平滑显示（逐帧推进，避免内容跳块/瞬间全显）
+  const isStreaming = node.status === "running" || !!data.isStreaming;
+  const displayContent = useSmoothStreamingText(data.content, isStreaming);
   const [copied, setCopied] = useState(false);
 
   // 判断当前 content 节点是否为其所在助手回复片段的最后一个节点（不仅是 content 类型）
@@ -52,7 +56,8 @@ export function ContentNode({ node, hideCopy }: ContentNodeProps) {
     <div className="wf-node">
       <div className="wf-content-text-wrapper">
         <MarkdownPreview
-          content={data.content}
+          content={displayContent}
+          streaming={isStreaming}
           className="wf-content-markdown"
         />
         {!hideCopy && isCompleted && isLastContentInTurn && isTurnCompleted && (

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import type { WorkflowNode, WorkflowNodeType } from "../../types";
 import { useWorkflowStore } from "../../stores/useWorkflowStore";
 import { UserNode } from "./UserNode";
@@ -21,7 +21,12 @@ interface WorkflowNodeRendererProps {
   nodeRef?: (el: HTMLElement | null) => void;
 }
 
-export function WorkflowNodeRenderer({ node, onRetry, hideCopy, nodeRef }: WorkflowNodeRendererProps) {
+/**
+ * 工作流节点渲染分发器（React.memo 包装）
+ * 流式更新时 store 中未变化的节点对象引用不变（updateNode 仅重建目标节点），
+ * memo 使其他节点跳过重渲染，避免每次 chunk 都重渲染整个时间线
+ */
+export const WorkflowNodeRenderer = memo(function WorkflowNodeRenderer({ node, onRetry, hideCopy, nodeRef }: WorkflowNodeRendererProps) {
   const { toggleNode } = useWorkflowStore();
   const nt = node.type as WorkflowNodeType;
 
@@ -69,4 +74,4 @@ export function WorkflowNodeRenderer({ node, onRetry, hideCopy, nodeRef }: Workf
     return <div ref={nodeRef}>{content}</div>;
   }
   return content;
-}
+});
