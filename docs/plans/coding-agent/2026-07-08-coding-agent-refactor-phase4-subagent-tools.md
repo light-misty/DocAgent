@@ -2446,7 +2446,6 @@ let scratchpad_states = register_builtin_tools(
 
 本阶段完成后,后续阶段将基于子 Agent 和高级工具进行扩展:
 
-- **阶段 5(LSP 集成)**:LSP 工具可与 SourceCode 工具互补,子 Agent 可使用 LSP 工具进行代码分析
 - **未来扩展**:子 Agent 可支持不同模型(如用更强模型执行复杂子任务,用轻量模型执行简单子任务)
 
 子 Agent 和高级工具是 Agent 能力扩展的关键,必须确保本阶段完全实施并通过验收后再进入下一阶段。

@@ -43,7 +43,6 @@
 - SessionCompaction 上下文压缩 → 阶段 3
 - 子 Agent (task 工具) → 阶段 4
 - WebFetch/WebSearch → 阶段 4
-- LSP 集成 → 阶段 5
 
 ### 1.3 验收标准
 
@@ -3196,10 +3195,6 @@ cargo test test_read_with_line_numbers
 ### 6.3 为阶段 4(子 Agent)奠定基础
 - AgentExecutor 保留 handler_registry,子 Agent 在 Document 模式下可复用文档 Handler
 - 工具链完整,子 Agent 可复用所有工具
-
-### 6.4 为阶段 5(LSP 集成)奠定基础
-- edit 工具的文件修改后,可触发 LSP 诊断
-- read 的行号显示,便于 LSP 跳转定位
 
 ---
 

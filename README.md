@@ -26,7 +26,6 @@ Download the latest Windows installer from [Releases](https://github.com/light-m
 - Multi-mode agent (Plan / Code / Document modes), autonomous task execution
 - SubAgent workflow for complex task decomposition
 - Read-only explore mode for safely browsing and analyzing project code
-- LSP (Language Server Protocol) integration with real-time code diagnostics
 - Permission system with granular control over file and command operations
 - Extensible Skill system for loading custom capabilities
 - Built-in Superpowers skill development workflow framework

@@ -64,8 +64,6 @@ pub enum PermissionType {
     Task,
     /// Skill 加载
     Skill,
-    /// LSP 调用
-    Lsp,
     /// 网页抓取:webfetch
     WebFetch,
     /// 网络搜索:websearch
@@ -95,7 +93,6 @@ impl fmt::Display for PermissionType {
             PermissionType::WriteScript => write!(f, "write_script"),
             PermissionType::Task => write!(f, "task"),
             PermissionType::Skill => write!(f, "skill"),
-            PermissionType::Lsp => write!(f, "lsp"),
             PermissionType::WebFetch => write!(f, "webfetch"),
             PermissionType::WebSearch => write!(f, "websearch"),
             PermissionType::ExternalDirectory => write!(f, "external_directory"),
@@ -121,7 +118,6 @@ impl PermissionType {
             "write_script" => Some(Self::WriteScript),
             "task" => Some(Self::Task),
             "skill" => Some(Self::Skill),
-            "lsp" => Some(Self::Lsp),
             "webfetch" | "web_fetch" => Some(Self::WebFetch),
             "websearch" | "web_search" => Some(Self::WebSearch),
             "external_directory" => Some(Self::ExternalDirectory),
@@ -155,8 +151,6 @@ impl PermissionType {
             "skill" => Self::Skill,
             // T3.08: source_code 工具映射到 Read 权限类型(只读搜索)
             "source_code" => Self::Read,
-            // T5.09: lsp 工具映射到 Lsp 权限类型(只读代码理解工具)
-            "lsp" => Self::Lsp,
             _ => Self::Wildcard,
         }
     }

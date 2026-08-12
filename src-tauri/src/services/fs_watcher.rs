@@ -26,8 +26,6 @@ pub struct FsWatcherService<R: Runtime> {
     active_watch: Arc<Mutex<Option<(String, PathBuf, String)>>>,
     /// 标记是否已经发射过目录删除事件，防止重复发射
     deletion_emitted: Arc<AtomicBool>,
-    /// LSP 结果缓存（文件变更时联动失效缓存）
-    lsp_cache: Option<Arc<crate::services::lsp::cache::LspResultCache>>,
     /// 文件索引缓存（文件变更时联动失效，下次搜索自动重建）
     file_index_cache: Option<Arc<crate::services::file_index::FileIndexCache>>,
 }
@@ -36,7 +34,6 @@ impl<R: Runtime> FsWatcherService<R> {
     /// 创建文件监听服务实例
     pub fn new(
         app_handle: AppHandle<R>,
-        lsp_cache: Option<Arc<crate::services::lsp::cache::LspResultCache>>,
         file_index_cache: Option<Arc<crate::services::file_index::FileIndexCache>>,
     ) -> Self {
         Self {
@@ -46,7 +43,6 @@ impl<R: Runtime> FsWatcherService<R> {
             skill_watcher: Arc::new(Mutex::new(None)),
             active_watch: Arc::new(Mutex::new(None)),
             deletion_emitted: Arc::new(AtomicBool::new(false)),
-            lsp_cache,
             file_index_cache,
         }
     }
@@ -101,7 +97,6 @@ impl<R: Runtime> FsWatcherService<R> {
         let ws_wname = wname.clone();
         let ws_wpath = wpath.clone();
         let ws_deletion_emitted = deletion_emitted.clone();
-        let ws_lsp_cache = self.lsp_cache.clone();
         let ws_file_index_cache = self.file_index_cache.clone();
         let workspace_callback = move |res: Result<Event, notify::Error>| {
             match res {
@@ -128,15 +123,6 @@ impl<R: Runtime> FsWatcherService<R> {
                             change_type,
                             path_str
                         );
-
-                        // 文件变更时联动失效 LSP 缓存，避免返回过期的定义/悬停信息
-                        if let Some(ref cache) = ws_lsp_cache {
-                            let cache = Arc::clone(cache);
-                            let p = path_str.clone();
-                            tauri::async_runtime::spawn(async move {
-                                cache.invalidate_file(&p).await;
-                            });
-                        }
 
                         // 文件变更时联动失效文件索引缓存，避免返回过期的搜索结果
                         if let Some(ref cache) = ws_file_index_cache {

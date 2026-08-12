@@ -3,7 +3,6 @@ pub mod document;
 pub mod handler;
 pub mod llm;
 pub mod log;
-pub mod lsp;
 pub mod permission;
 pub mod session;
 pub mod settings;

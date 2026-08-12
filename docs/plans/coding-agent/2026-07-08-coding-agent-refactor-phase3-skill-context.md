@@ -2931,6 +2931,5 @@ fn other_function() {
 本阶段完成后,后续阶段将基于 Skill 系统和上下文管理进行扩展:
 
 - **阶段 4(子 Agent 与高级工具)**:子 Agent 可继承父 Agent 的 Skill 上下文;WebFetch/WebSearch 工具受权限系统控制
-- **阶段 5(LSP 集成)**:LSP 工具与 SourceCode 工具互补,SourceCode 提供基于语法树的搜索,LSP 提供基于语义索引的跳转/引用查找
 
 Skill 系统和上下文管理是 Agent 能力扩展的基础,必须确保本阶段完全实施并通过验收后再进入下一阶段。

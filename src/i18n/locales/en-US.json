@@ -188,7 +188,6 @@
       "write_script": "Write Script",
       "task": "Task",
       "skill": "Skill",
-      "lsp": "LSP",
       "web_fetch": "Web Fetch",
       "web_search": "Web Search",
       "external_directory": "External Directory",
@@ -302,8 +301,7 @@
       "appearance": "Appearance",
       "shortcuts": "Shortcuts",
       "general": "General",
-      "help": "Help",
-      "lsp": "LSP Language Servers"
+      "help": "Help"
     },
     "general": {
       "sectionTitle": "General Settings",
@@ -479,8 +477,7 @@
         "task": "Delegate a subtask to a sub-agent for execution. The sub-agent has its own independent context and inherits the parent agent's system prompt, workspace, and tool configuration. Suitable for decomposing complex tasks into independent subtasks. Supports two modes: single (single subtask) and batch (parallel batch subtasks).",
         "webfetch": "Fetch the web content of a specified URL and automatically convert it to Markdown format. Supports HTML pages, JSON APIs, and plain text resources. Suitable for reading online docs, API references, technical articles, etc. Intranet addresses and sensitive ports are automatically blocked.",
         "websearch": "Perform a web search and return a list of relevant results (title, URL, snippet). Suitable for finding latest information, technical docs, API usage, etc. The search backend is determined by configuration (MCP/Tavily/SerpAPI).",
-        "question": "Ask the user a question and wait for an answer. Suitable when user decision, requirement clarification, or option selection is needed. Up to 4 questions can be asked at once, each with 2-4 options. Execution continues after the user answers.",
-        "lsp": "LSP code intelligence tool (experimental). Specify the operation type via the operation parameter:\n- definition: Go to symbol definition\n- references: Find symbol references\n- hover: Get hover information\n- diagnostics: Get file diagnostics\n- document_symbol: Get document symbol list\n- workspace_symbol: Search workspace symbols\n- implementation: Go to implementation\n- call_hierarchy: Get call hierarchy (direction=incoming|outgoing)"
+        "question": "Ask the user a question and wait for an answer. Suitable when user decision, requirement clarification, or option selection is needed. Up to 4 questions can be asked at once, each with 2-4 options. Execution continues after the user answers."
       }
     },
     "templates": {
@@ -645,40 +642,6 @@
       "faqA5": "Click the workspace selector in the top bar to add, switch and manage workspaces. Each workspace's files and configuration are independent.",
       "faqQ6": "How to use Prompt templates?",
       "faqA6": "You can create and manage commonly used Prompt templates in Settings > Prompt Templates, with support for variable placeholders. You can quickly insert template content through the template picker in the input box."
-    },
-    "lsp": {
-      "title": "LSP Language Server Status",
-      "description": "View and manage language server processes",
-      "refresh": "Refresh",
-      "restart": "Restart",
-      "stopAll": "Stop All",
-      "language": "Language",
-      "status": "Status",
-      "command": "Command",
-      "pid": "PID",
-      "serverName": "Server",
-      "workspaceRoot": "Workspace Root",
-      "startedAt": "Started At",
-      "noServers": "No registered language servers",
-      "statusRunning": "Running",
-      "statusStopped": "Stopped",
-      "statusStarting": "Starting",
-      "statusError": "Error",
-      "loadError": "Failed to load LSP status",
-      "restartSuccess": "Language server restarted",
-      "restartError": "Restart failed",
-      "errorProgramNotFound": "LSP server program not found, please ensure the language server is installed and added to PATH",
-      "errorProcessExited": "LSP server exited immediately after start, please check if the workspace contains project identifier files (e.g. Cargo.toml)",
-      "errorTimeout": "LSP server response timeout, may be indexing or workspace configuration is abnormal",
-      "stopAllSuccess": "All language servers stopped",
-      "stopAllError": "Stop failed",
-      "experimental": "Experimental",
-      "enableLsp": "Enable LSP Language Server",
-      "enableLspDesc": "Provides code completion, diagnostics and other language services",
-      "confirmTitle": "Experimental Feature Confirmation",
-      "confirmContent": "LSP Language Server is an experimental feature. Enabling it may affect performance or stability. Are you sure you want to enable it?",
-      "confirmCancel": "Cancel",
-      "confirmEnable": "Enable"
     }
   },
   "history": {

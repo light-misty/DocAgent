@@ -1,6 +1,6 @@
 # Samoyed Work 编程 Agent 改造总体计划
 
-> 文档版本:v1.2(2026-07-09 修订:LSP 单工具架构,新增 apply_patch/question 工具,工具清单对齐 OpenCode 13 个,grep/glob 基于 ignore crate,websearch 改为 MCP 协议,read_lines 合并到 read)
+> 文档版本:v1.2(2026-07-09 修订:新增 apply_patch/question 工具,工具清单对齐 OpenCode 13 个,grep/glob 基于 ignore crate,websearch 改为 MCP 协议,read_lines 合并到 read)
 > v1.1(2026-07-08 修订:保留文档 Handler,新增 Document 模式)
 > 创建日期:2026-07-08
 > 改造目标:将 Samoyed Work 从文档处理智能体改造为通用编程 Agent,参照 OpenCode 的功能实现,同时保留文档处理能力(按 Document 模式启用)
@@ -23,13 +23,12 @@ Samoyed Work 起初定位为 AI 文档处理桌面应用,基于 Tauri 2.x (Rust 
 参照开源编程 Agent [OpenCode](https://github.com/sst/opencode) (sst/opencode, branch 2.0) 的功能实现,对 Samoyed Work 进行大型改造:
 
 1. **系统提示词架构**:从"文档处理专家"重构为"编程 Agent",引入 AGENTS.md 机制、Agent 类型特定 prompt
-2. **内置工具链**:保留文档 Handler(按模式动态启用),新增编程核心工具(edit/glob/grep/todowrite/task/webfetch/lsp 等)
+2. **内置工具链**:保留文档 Handler(按模式动态启用),新增编程核心工具(edit/glob/grep/todowrite/task/webfetch 等)
 3. **Agent 模式**:实现 Plan(只读规划)/Build(执行修改)/Document(文档处理)三态模式切换,文档 Handler 仅在 Document 模式下出现在工具列表中
 4. **权限系统**:从简单 ConfirmationLevel 升级为三态权限(allow/deny/ask) + 可持久化规则
 5. **Skill 系统**:实现 SKILL.md 加载机制,按需注入领域能力
 6. **子 Agent**:实现 task 工具,支持 Agent 嵌套调用
-7. **LSP 集成**:实现 LSP 客户端,支持跳转定义、查找引用、诊断反馈
-8. **上下文管理**:实现 SessionCompaction(上下文压缩)、Doom loop 检测
+7. **上下文管理**:实现 SessionCompaction(上下文压缩)、Doom loop 检测
 
 ### 1.3 改造原则
 
@@ -52,7 +51,6 @@ Samoyed Work 起初定位为 AI 文档处理桌面应用,基于 Tauri 2.x (Rust 
 | **工具数量** | 13 个核心工具(官方对齐) | 16 个 Tool + 4 个 Handler | 保留 Handler(按模式启用),对齐 OpenCode 13 个核心工具 + Samoyed Work 扩展 |
 | **权限系统** | 三态(allow/deny/ask) + 持久化规则 | ConfirmationLevel(Always/DeleteOnly/Never) | 升级为三态权限 |
 | **Skill 系统** | .opencode/skill/*/SKILL.md | 无 | 实现 Skill 加载 |
-| **LSP 集成** | 有(单一 lsp 工具,operation 参数路由) | 无 | 实现 LSP 客户端(实验性) |
 | **子 Agent** | 有(task 工具) | 无 | 实现 Agent 嵌套 |
 | **上下文压缩** | SessionCompaction | 无 | 实现压缩机制 |
 | **规则文件** | AGENTS.md/CLAUDE.md/CONTEXT.md | 无 | 实现 AGENTS.md |
@@ -108,7 +106,6 @@ System Prompt
 | **网页抓取** | webfetch | 无 | **新增 webfetch 工具** |
 | **网络搜索** | websearch | 无 | **新增 websearch 工具**(MCP 协议,Exa AI) |
 | **用户提问** | question | 无 | **新增 question 工具**(独立权限类别) |
-| **LSP** | lsp(单一工具,operation 路由 8 种操作) | 无 | **新增 lsp 工具**(阶段5,实验性) |
 | **代码搜索** | sourcecode, codesearch | 无 | **新增 sourcecode 工具** |
 | **脚本执行** | 无(用 bash) | write_script, run_command | 保留(Samoyed Work 特色) |
 | **文档处理** | 无 | 4 个 Handler | **保留,按 Document 模式动态启用** |
@@ -126,7 +123,6 @@ System Prompt
 │   ├── services/tool/          工具链重构(新增 edit/glob/grep/todowrite/task/webfetch/apply_patch/question 等)
 │   ├── services/permission/    [新] 权限系统(三态决策 + 持久化规则)
 │   ├── services/skill/         [新] Skill 加载系统
-│   ├── services/lsp/           [新] LSP 客户端
 │   ├── services/subagent/      [新] 子 Agent 执行器
 │   ├── services/handler/       [保留] 文档 Handler(按 Document 模式动态启用)
 │   ├── services/document/      [保留] Python Sidecar 管理(Document 模式下使用)
@@ -149,7 +145,7 @@ System Prompt
 │   └── [保留]                 Document 模式下提供文档处理能力
 │
 └── 配置文件
-    ├── Cargo.toml              新增 lsp-types 等,保留 Sidecar 相关依赖
+    ├── Cargo.toml              保留 Sidecar 相关依赖
     ├── package.json            保留 sidecar 构建脚本
     └── tauri.conf.json         保留 sidecar 相关配置
 ```
@@ -264,41 +260,6 @@ System Prompt
 
 ---
 
-#### 阶段 5:LSP 集成
-
-**目标**:实现 LSP 客户端,支持代码导航和诊断
-
-**主要任务**:
-1. 实现 LSP 客户端:
-   - 基于 lsp-types crate 实现 LSP 协议
-   - 支持 LSP 服务器自动启动(按文件类型)
-   - 常见语言服务器配置(TypeScript/Python/Rust/Go/Java)
-2. 实现 LSP 工具(实验性,参照 OpenCode `OPENCODE_EXPERIMENTAL_LSP_TOOL`):
-   - 单一 `lsp` 工具,通过 `operation` 参数路由 8 种操作:
-     - `definition`:跳转到定义
-     - `references`:查找引用
-     - `hover`:悬停信息
-     - `diagnostics`:获取诊断信息(错误、警告)
-     - `document_symbol`:文档符号列表
-     - `workspace_symbol`:工作区符号搜索
-     - `implementation`:跳转到实现
-     - `call_hierarchy`:调用层次
-3. 集成到 edit 工具:
-   - 编辑文件后自动触发 LSP 诊断
-   - 将诊断错误反馈给 LLM
-4. LSP 服务器管理:
-   - 按工作区启动/停止 LSP 服务器
-   - 服务器健康检查和自动重启
-5. 前端 LSP 状态展示(可选):
-   - 显示当前激活的 LSP 服务器
-   - 诊断信息可视化
-
-**交付物**:具备代码导航和诊断能力的完整编程 Agent
-
-**详细文档**:[2026-07-08-coding-agent-refactor-phase5-lsp.md](./2026-07-08-coding-agent-refactor-phase5-lsp.md)
-
----
-
 ### 3.3 阶段依赖关系
 
 ```
@@ -309,17 +270,14 @@ System Prompt
    │       └──> 阶段 3 (Skill 系统与上下文管理)
    │               │
    │               └──> 阶段 4 (子 Agent 与高级工具)
-   │                       │
-   │                       └──> 阶段 5 (LSP 集成)
    │
    └──> [可并行] 阶段 3 的 Skill 系统部分(不依赖阶段 2)
 ```
 
 **依赖说明**:
 - 阶段 1 是所有后续阶段的基础,必须先完成
-- 阶段 2 的权限系统是阶段 3/4/5 的前提(新工具需要权限控制)
+- 阶段 2 的权限系统是阶段 3/4 的前提(新工具需要权限控制)
 - 阶段 3 的上下文压缩是阶段 4 子 Agent 的前提(子 Agent 需要独立上下文)
-- 阶段 4 的子 Agent 是阶段 5 LSP 的前提(LSP 工具需要权限和上下文管理)
 - 部分阶段可并行:阶段 3 的 Skill 系统不依赖阶段 2,可并行开发
 
 ---
@@ -348,7 +306,6 @@ System Prompt
 | **grep 工具** | `ignore` crate(ripgrep 封装) + `regex` | 高性能正则搜索,支持 .gitignore |
 | **edit 工具** | 自实现 + `similar` crate | 精确字符串替换 + 差异计算 |
 | **apply_patch 工具** | 自实现 | 应用补丁文件修改代码(edit 权限类别) |
-| **LSP 客户端** | `lsp-types` + `tokio` | LSP 协议实现(单一 lsp 工具,operation 路由) |
 | **tree-sitter** | `tree-sitter` crate | 代码语法分析(用于 sourcecode 工具) |
 | **网页抓取** | `reqwest` + `scraper` | HTTP 请求 + HTML 解析 |
 | **网络搜索** | MCP 协议(Exa AI,JSON-RPC 2.0) | websearch 工具实现 |
@@ -388,10 +345,7 @@ pub fn register_builtin_tools(
     // Phase 4 新增:子 Agent 执行器和网络搜索配置
     sub_executor: Arc<SubAgentExecutor>,
     web_search_config: WebSearchConfig,
-    // Phase 5 新增:LSP 相关组件
-    lsp_manager: Arc<LspServerManager>,
-    lsp_router: Arc<LanguageRouter>,
-    lsp_cache: Arc<LspResultCache>,
+    skill_registry: Arc<SkillRegistry>,
 ) -> SharedScratchpadStates
 ```
 
@@ -403,7 +357,7 @@ pub fn register_builtin_tools(
 - **Phase 2**:签名扩展为 `(registry, git_bash_path, agent_mode_manager) -> SharedScratchpadStates`
 - **Phase 3**:签名扩展为 `(registry, git_bash_path, agent_mode_manager, db) -> SharedScratchpadStates`
 - **Phase 4**:签名扩展为 `(registry, git_bash_path, agent_mode_manager, db, sub_executor, web_search_config) -> SharedScratchpadStates`
-- **Phase 5**:签名扩展为最终形态(上述完整签名)
+- 最终形态签名见上方定义
 
 **注意**:
 - `workspace_root` 不作为 `register_builtin_tools` 的参数(工作区路径由 executor 在运行时注入,不在工具注册时传递)
@@ -462,7 +416,6 @@ fn layer_context(
 
 | 风险 | 影响 | 应对措施 |
 |------|------|----------|
-| **LSP 集成复杂度高** | 阶段 5 可能延期 | LSP 作为最后阶段,不影响核心功能;可降级为仅支持 TypeScript/Python |
 | **子 Agent 递归调用导致栈溢出** | 阶段 4 稳定性问题 | 限制子 Agent 最大嵌套深度(默认 3 层);子 Agent 独立 tokio task |
 | **权限规则过多影响性能** | 阶段 2 性能问题 | 权限规则按 glob 模式索引;热规则缓存在内存 |
 | **上下文压缩丢失关键信息** | 阶段 3 任务失败 | 压缩前生成摘要;保留最近 N 轮完整历史;压缩可回滚 |
@@ -494,7 +447,6 @@ fn layer_context(
 ├── 集成测试(适量)
 │   ├── 工具链集成测试(edit + read + grep 组合)
 │   ├── 权限系统集成测试(规则匹配 + 持久化)
-│   ├── LSP 集成测试(启动服务器 + 跳转定义)
 │   └── 子 Agent 集成测试(嵌套调用 + 结果汇总)
 │
 └── 单元测试(大量)
@@ -517,7 +469,6 @@ fn layer_context(
 5. **Plan/Build/Document 模式切换**:Plan 模式下 edit 被拒绝;Build 模式下文档 Handler 不在工具列表;Document 模式下文档 Handler 出现且可调用
 6. **Skill 加载**:SKILL.md frontmatter 解析、按权限过滤、按需加载内容
 7. **子 Agent**:task 工具委托、独立上下文、结果汇总、嵌套深度限制
-8. **LSP**:服务器自动启动、跳转定义、诊断反馈
 
 ### 6.3 验证标准
 
@@ -539,7 +490,6 @@ fn layer_context(
 | 阶段 2 | [权限系统与 Agent 模式](./2026-07-08-coding-agent-refactor-phase2-permission.md) | 已完成 |
 | 阶段 3 | [Skill 系统与上下文管理](./2026-07-08-coding-agent-refactor-phase3-skill-context.md) | 已完成 |
 | 阶段 4 | [子 Agent 与高级工具](./2026-07-08-coding-agent-refactor-phase4-subagent-tools.md) | 已完成 |
-| 阶段 5 | [LSP 集成](./2026-07-08-coding-agent-refactor-phase5-lsp.md) | 已完成 |
 
 ---
 
@@ -566,7 +516,6 @@ fn layer_context(
 
 - **Anthropic Effective Context Engineering**:Structured Note-taking 模式(Scratchpad 设计依据)
 - **Claude Code 实践**:重试策略、流式看门狗、提示词缓存
-- **LSP 协议规范**:https://microsoft.github.io/language-server-protocol/
 
 ---
 
@@ -578,7 +527,6 @@ fn layer_context(
 | M2: 权限与模式 | 阶段 2 完成 | Plan/Build 模式切换可用,权限审批正常 |
 | M3: Skill 与压缩 | 阶段 3 完成 | Skill 加载正常,长对话不爆上下文 |
 | M4: 子 Agent | 阶段 4 完成 | task 工具委托正常,网页抓取可用 |
-| M5: LSP 集成 | 阶段 5 完成 | 跳转定义、查找引用、诊断反馈可用 |
 | **最终验收** | 全部完成 | Samoyed Work 可作为通用编程 Agent 使用,通过 E2E 测试 |
 
 ---
@@ -602,7 +550,6 @@ pub struct AppState {
     pub scratchpad_states: SharedScratchpadStates,   // [保留] 阶段3整合进 TodoWrite
     // [新增] 阶段2: permission_registry: Arc<PermissionRegistry>
     // [新增] 阶段3: skill_service: Arc<SkillService>
-    // [新增] 阶段5: lsp_manager: Arc<LspManager>
 }
 ```
 
@@ -616,7 +563,6 @@ pub struct AppState {
 | read | read | 读取文件内容(支持行号范围 start_line/end_line) |
 | grep | grep | 基于 ignore crate 的正则搜索(支持 .gitignore) |
 | glob | glob | 基于 ignore crate 的文件模式匹配(支持 .gitignore) |
-| lsp | lsp | LSP 代码智能(单一工具,operation 参数路由 8 种操作,实验性) |
 | apply_patch | edit | 应用补丁文件修改代码 |
 | skill | skill | 加载 Skill |
 | todowrite | todowrite | 管理待办列表 |
@@ -661,7 +607,6 @@ pub struct AppState {
 | 当前代码名(旧) | 目标新名 | 类型 | 说明 |
 |---------------|---------|------|------|
 | read_file_lines | read | 合并 | 合并到 read,通过 start_line/end_line 参数实现行号范围读取 |
-| lsp_definition / lsp_references / lsp_diagnostics / lsp_hover | lsp | 合并 | 合并为单一 lsp 工具,通过 operation 参数路由 8 种操作(实验性) |
 
 **C. 新增工具(OpenCode 引入,沿用原名)**
 
@@ -696,4 +641,4 @@ pub struct AppState {
 - `list_tools`:保留,返回值按当前 Agent 模式过滤
 - `start_agent`:增加 mode 参数(阶段2,支持 plan/build/document)
 - `confirm_operation`:升级为权限审批(阶段2)
-- 新增命令:`list_skills`, `load_skill`, `lsp` 等
+- 新增命令:`list_skills`, `load_skill` 等

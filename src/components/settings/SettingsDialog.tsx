@@ -10,7 +10,6 @@ import { AppearanceTab } from "./AppearanceTab";
 import { ShortcutsTab } from "./ShortcutsTab";
 import { GeneralTab } from "./GeneralTab";
 import { HelpTab } from "./HelpTab";
-import { LspStatusPanel } from "./LspStatusPanel";
 
 export function SettingsDialog() {
   const { t } = useTranslation();
@@ -26,7 +25,6 @@ export function SettingsDialog() {
     { id: "shortcuts" as const, label: t('settings.tabs.shortcuts'), icon: "keyboard" },
     { id: "general" as const, label: t('settings.tabs.general'), icon: "code" },
     { id: "help" as const, label: t('settings.tabs.help'), icon: "info" },
-    { id: "lsp" as const, label: t('settings.tabs.lsp'), icon: "code" },
   ];
 
   useEffect(() => {
@@ -50,7 +48,6 @@ export function SettingsDialog() {
       case "shortcuts": return <ShortcutsTab />;
       case "general": return <GeneralTab />;
       case "help": return <HelpTab />;
-      case "lsp": return <LspStatusPanel />;
     }
   };
 

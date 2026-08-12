@@ -14,7 +14,6 @@
 | 工作区 | 当前工作区可写，由智能体创建 `__self_test__/` 子目录作为测试沙箱，链路全部结束后清理 |
 | LLM Provider | 至少配置 1 个可用 Provider（OpenAI/Anthropic/Gemini 任一） |
 | Agent 模式 | **Build 模式**（确保 4 个文档 Handler 不出现在工具列表中） |
-| LSP | 实验性开关状态以当前配置为准；未启用时相关测试标 SKIP |
 | 网络 | 默认联网；链路六与链路十需联网 |
 | 日志 | `log/samoyed_work.log`（Rust）和 `src-tauri/target/debug/log/sidecar.log`（Sidecar） |
 
@@ -109,13 +108,12 @@
 
 ---
 
-## 7. 链路七：代码工具（source_code 搜索 → list_symbols → LSP）
+## 7. 链路七：代码工具（source_code 搜索 → list_symbols）
 
 | ID | 步骤 | 工具 | 操作 | 预期结果 | 实际结果 | 结论 |
 |---|---|---|---|---|---|---|
 | T-B-CHAIN7-01 | 7.1 符号搜索 | `source_code` | 对 `src-tauri/src/services/tool/` 调用 `action=search, symbolName="*Tool", symbolType="struct"` | 返回符号列表（含文件路径、行号、符号类型） | | |
 | T-B-CHAIN7-02 | 7.2 单文件符号 | `source_code` | 对单个 `.rs` 文件调用 `action=list_symbols` | 返回该文件全部符号 | | |
-| T-B-CHAIN7-03 | 7.3 LSP（实验性） | `lsp` | 1) `operation=workspace_symbol, query="AgentExecutor"`；2) `operation=hover` 对 `executor.rs` 中某符号 | 返回符号信息；未启用 LSP 时标 SKIP；启用但服务器不可用时返回 `fallback: true` 而非错误 | | |
 
 ---
 
@@ -206,7 +204,6 @@
 | T-B-CHAIN4-08 | 需要在多会话间切换，单会话环境无法测试 |
 | T-B-CHAIN7-01 | 当前工作区无 Rust 源码，source_code 工具无法测试 |
 | T-B-CHAIN7-02 | 当前工作区无 Rust 源码，source_code 工具无法测试 |
-| T-B-CHAIN7-03 | LSP 实验性功能未启用 |
 | T-B-CHAIN8-05 | 需要手动切换 ConfirmationLevel 配置 |
 | T-B-CHAIN8-08 | 标记为可选，跳过测试 |
 | T-B-CHAIN9-01~9-07 | 需前端事件监听/SQLite 检查/特殊配置，CLI 环境无法完整测试 |
@@ -236,7 +233,7 @@
 5) 每完成一项测试，立即在表格"实际结果"和"结论"列填写结果。
 6) 测试中如发现工具/机制异常，先记录为 FAIL 并简要描述现象，不要尝试修复。
 7) 全部链路完成后，执行链路十一统一清理，再填写第 12 章汇总表。
-8) 对于依赖外部条件（无网络、无 LSP、无搜索后端）的测试，可标 SKIP 并注明原因。
+8) 对于依赖外部条件（无网络、无搜索后端）的测试，可标 SKIP 并注明原因。
 ```
 
 ## 附录 B：关键错误码速查

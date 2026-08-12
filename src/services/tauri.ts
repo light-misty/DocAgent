@@ -37,7 +37,6 @@ import type {
   PermissionRule,
   AddPermissionRuleParams,
   UpdatePermissionRuleParams,
-  LspServerInfo,
   SkillInfo,
   TodoList,
   RollbackResult,
@@ -694,38 +693,6 @@ export async function deletePermissionRule(ruleId: string): Promise<void> {
   if (!result.ok) throw result.error.raw;
 }
 
-// ================================================================
-// LSP 命令
-// ================================================================
-
-/** 获取所有 LSP 服务器状态 */
-export async function lspGetStatus(): Promise<LspServerInfo[]> {
-  const result = await safeInvoke(() => invoke<LspServerInfo[]>("lsp_get_status"), { context: "lspGetStatus" });
-  if (!result.ok) throw result.error.raw;
-  return result.data;
-}
-
-/** 重启指定语言的 LSP 服务器 */
-export async function lspRestartServer(language: string): Promise<void> {
-  // 禁用默认 Toast，由前端 handleRestart 统一处理错误提示，避免双重 Toast
-  const result = await safeInvoke(() => invoke("lsp_restart_server", { language }), { context: "lspRestartServer", showToast: false });
-  if (!result.ok) throw result.error.raw;
-}
-
-/** 停止所有 LSP 服务器 */
-export async function lspStopAll(): Promise<void> {
-  const result = await safeInvoke(() => invoke("lsp_stop_all"), { context: "lspStopAll" });
-  if (!result.ok) throw result.error.raw;
-}
-
-/** 初始化 LSP：注册并启动所有启用的语言服务器 */
-export async function lspInitialize(): Promise<LspServerInfo[]> {
-  const result = await safeInvoke(() => invoke<LspServerInfo[]>("lsp_initialize"), { context: "lspInitialize" });
-  if (!result.ok) throw result.error.raw;
-  return result.data;
-}
-
-// ================================================================
 // 分支命令
 // ================================================================
 

@@ -18,7 +18,7 @@ import type {
 // 所有权限类型选项
 const PERMISSION_TYPES: PermissionType[] = [
   'wildcard', 'read', 'edit', 'glob', 'grep', 'list',
-  'bash', 'write_script', 'task', 'skill', 'lsp',
+  'bash', 'write_script', 'task', 'skill',
   'web_fetch', 'web_search', 'external_directory', 'doom_loop',
   'document', 'question',
 ];

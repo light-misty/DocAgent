@@ -102,10 +102,10 @@ src/                     React 前端 (TypeScript)
     sidebar/             侧边栏: FileTreeSection, AgentInfoSection,
                             SessionListSection
     preview/             文档预览: PreviewPage, MarkdownPreview, PdfCanvasViewer
-    settings/            设置弹窗: SettingsDialog + 9 标签页
+    settings/            设置弹窗: SettingsDialog + 8 标签页
                             (LLMConfig, HandlersTab, TemplatesTab,
                              AppearanceTab, ShortcutsTab, GeneralTab, HelpTab,
-                             LspStatusPanel, PermissionTab)
+                             PermissionTab)
                             + 子弹窗 (ProviderFormDialog, AddWorkspaceDialog,
                               TemplateEditDialog)
     common/              通用组件: Button, Icon, ContextMenu, CustomScrollArea,
@@ -128,8 +128,8 @@ src-tauri/               Rust 后端
   src/
     lib.rs               入口, AppState定义 (含 network_monitor/file_index_cache),
                            命令注册, 初始化流程
-    commands/            Tauri命令层 (13个模块): llm, session, workspace, document,
-                            handler, settings, agent, template, log, lsp,
+    commands/            Tauri命令层 (12个模块): llm, session, workspace, document,
+                            handler, settings, agent, template, log,
                             permission, skill, update (desktop)
     services/
       agent/             Agent调度引擎: executor, context (对话上下文管理),
@@ -146,8 +146,6 @@ src-tauri/               Rust 后端
       skill/             Skill引擎: loader (加载器), registry (注册表),
                             tool (SkillTool 按需加载)
       code/              代码解析与搜索: parser (tree-sitter解析), search (语义搜索)
-      lsp/               LSP系统: manager (服务器管理), client (协议客户端),
-                            cache (结果缓存), router (语言路由)
       web/               网络服务: fetcher (网页抓取), searcher (网络搜索),
                             url_validator (URL安全校验)
       attachment.rs      文件附件处理
@@ -160,7 +158,7 @@ src-tauri/               Rust 后端
                             skill_repo, sub_agent_message_repo, todo_repo
     config/              配置管理: app_settings, llm_config, workspace_config
     models/              数据模型: message, session, document, llm, handler,
-                            workspace, template, tool, context_memory, lsp,
+                            workspace, template, tool, context_memory,
                             permission, skill, sub_agent, todo, branch
     events/              事件系统: types, emitter
     utils/               工具: logger (双输出日志), git_utils, 路径工具
@@ -225,7 +223,7 @@ docs/                    详细开发文档
 ### Tool 系统（基础操作，始终启用）
 - Tool 是轻量级、始终启用的基础操作工具，与 Handler 平行但不可禁用
 - 每个 Tool 实现 `Tool` trait（与 Handler 相似的接口: `tool_name()`, `description()`, `parameters()`, `execute()`）
-- 内置 25 个 Tool（纯 Rust 实现，不依赖 Python Sidecar）（实验性开关开启 LSP 时为 26 个）:
+- 内置 25 个 Tool（纯 Rust 实现，不依赖 Python Sidecar）:
   - `list_directory`: 列出目录内容（支持深度控制、扩展名过滤、排序，含路径遍历安全校验）
   - `search_files`: 按文件名/内容搜索文件（支持扩展名过滤、内容预览）
   - `read_file`: 读取纯文本文件（.txt/.md/.csv/.json 等，1MB 上限，含路径校验）
@@ -251,15 +249,6 @@ docs/                    详细开发文档
   - `webfetch`: 获取 URL 内容并转为 Markdown（阶段 4，受权限系统控制，URL 验证拒绝内网地址和非 HTTP 协议）
   - `websearch`: 网络搜索（阶段 4，支持 MCP/Tavily/SerpAPI 后端，受权限系统控制）
   - `question`: 向用户提问并等待回答（阶段 4，通过 AGENT_QUESTION 事件推送问题，前端通过 submit_question_answer 命令回复，5 分钟超时）
-  - `lsp`: LSP 代码智能工具（实验性，需 `lsp.experimental_enabled=true` 开启），通过 `operation` 参数路由 8 种操作：
-    - `definition`: 跳转到符号定义
-    - `references`: 查找符号引用
-    - `hover`: 获取符号悬停信息（类型、文档）
-    - `diagnostics`: 获取文件诊断信息
-    - `document_symbol`: 获取文档符号列表
-    - `workspace_symbol`: 搜索工作区符号
-    - `implementation`: 跳转到实现
-    - `call_hierarchy`: 获取调用层级（direction=incoming|outgoing）
 - Tool 注册在 `ToolRegistry` 中，通过 `Arc<dyn Tool>` 共享访问
 - 共同路径安全机制：所有文件操作通过 executor 注入 `workspace_root`，拒绝路径遍历攻击
 - TaskTool 采用延迟注入模式：先注册不含 SubAgentExecutor 的实例，后续在 lib.rs setup 中通过 `set_sub_executor` 注入（解决 TaskTool ↔ SubAgentExecutor 循环依赖）
@@ -303,7 +292,6 @@ AppState {
     network_monitor: Arc<NetworkMonitor>,
     scratchpad_states: SharedScratchpadStates,
     skill_registry: Arc<SkillRegistry>,
-    lsp_manager: Arc<LspServerManager>,
     file_index_cache: Arc<FileIndexCache>,
 }
 ```
@@ -330,7 +318,6 @@ AppState {
 ### 后台健康检查
 - LLM Provider 健康检查: 每 5 分钟执行一次 `health_check_all()`，自动标记不可用 Provider；切换时发射 `llm:provider_switch` 事件
 - Sidecar 健康检查: 每 3 分钟执行一次，不健康时记录警告日志
-- LSP 健康检查: 按配置间隔执行（`health_check_interval_seconds` > 0 时启动）
 - 工作区目录存在性检查: 每 10 秒执行一次（父目录监听器失效时的兜底），目录被删除时发射 `workspace:directory_deleted` 并停止监听
 - 网络状态监控: `NetworkMonitor` 定时检测网络连通性，状态变化时发射 `system:network_change` 事件；断网时自动暂停 LLM 请求并在恢复后重试
 
@@ -390,7 +377,7 @@ AppState {
 ### 文件监听服务
 - 基于 `notify` crate 的 `RecommendedWatcher`，递归监听工作区目录
 - 文件变更时发射 `file:change` 事件到前端，用于实时刷新文件树
-- 文件变更联动失效 LSP 缓存与文件索引缓存（`file_index_cache`）
+- 文件变更联动失效文件索引缓存（`file_index_cache`）
 - `.git/HEAD` 文件变化时发射 `git:status_changed` 事件（前端刷新 Git 状态展示）
 - 支持监听器切换（切换到新工作区时自动停止旧监听器）
 
@@ -430,7 +417,7 @@ AppState {
 - CSP: `connect-src 'self' https://* http://*`（允许任意 http/https 域名，用于 LLM API 调用）；`img-src` 含 `asset:` 与 `https:`；`font-src` 允许 `https://fonts.gstatic.com`；assetProtocol 启用（本地图片预览）
 - 使用 `capabilities/` 目录配置插件权限（shell、dialog 等）
 - Tauri 插件: `tauri-plugin-shell`, `tauri-plugin-dialog`；桌面端额外注册 `tauri-plugin-updater` + `tauri-plugin-process`
-- 73 个注册命令覆盖 LLM 管理、会话 CRUD（含分支）、工作区操作、文档处理、Handler 管理、工具管理、设置、模板 CRUD、权限规则管理、Skill 管理、日志读取、LSP 管理、更新检查/安装等
+- 71 个注册命令覆盖 LLM 管理、会话 CRUD（含分支）、工作区操作、文档处理、Handler 管理、工具管理、设置、模板 CRUD、权限规则管理、Skill 管理、日志读取、更新检查/安装等
 
 ### 自动更新
 - 通过 `tauri-plugin-updater` 实现自动更新，NSIS 安装器打包
@@ -489,5 +476,5 @@ AppState {
 - 文档预览: 普通文件返回文本 `PreviewContent`，PDF 文件通过 `get_pdf_data` 返回 base64 数据由前端 `PdfCanvasViewer` 渲染；图片通过 `convertFileSrc` (asset 协议) 加载预览
 - 所有文件操作（创建/删除/重命名）通过 Tauri 命令在 Rust 端执行，前端不直接操作文件系统
 - 命令超时由 LLM 通过 run_command 的 `timeout` 参数自主控制，最大 300 秒（无全局超时配置）
-- 应用初始化顺序: 应用数据目录 → 日志系统 → 数据库（含损坏检测+自动重建） → 配置管理器 → LLM Config（builtin_provider 注入） → LLM Router → Python 解释器路径解析（`SAMOYED_WORK_PYTHON` > 嵌入式 > 系统 PATH）与 Sidecar 超时配置 → Sidecar → Handler 注册表 + builtin handlers → 权限系统组件（permission_registry/doom_loop_detector/agent_mode_manager）→ question_channels → LSP 组件（manager/router/cache，根目录优先活动工作区；`lsp.enabled` 时注册服务器配置）→ Skill 注册表（全局 `~/.agent/skills/` + 项目 `.agent/skills/`）→ Tool 注册表 + builtin tools（读取 `git_bash_path` 和 `web_search` 配置，含 task/webfetch/websearch/question/skill 工具；仅在 `lsp.experimental_enabled=true` 时注册 LspTool）→ SubAgentExecutor 创建并通过 `set_sub_executor` 延迟注入 TaskTool → FileIndexCache + FS 监听器（联动失效 LSP 缓存与文件索引缓存）→ 网络状态监控器 → AppState 注册 → 自动监听活动工作区 → Skill 目录热重载监听 → 后台健康检查任务（LLM 每5分钟、Sidecar 每3分钟、LSP 按配置间隔、工作区目录存在性每10秒）→ 网络监控启动
+- 应用初始化顺序: 应用数据目录 → 日志系统 → 数据库（含损坏检测+自动重建） → 配置管理器 → LLM Config（builtin_provider 注入） → LLM Router → Python 解释器路径解析（`SAMOYED_WORK_PYTHON` > 嵌入式 > 系统 PATH）与 Sidecar 超时配置 → Sidecar → Handler 注册表 + builtin handlers → 权限系统组件（permission_registry/doom_loop_detector/agent_mode_manager）→ question_channels → Skill 注册表（全局 `~/.agent/skills/` + 项目 `.agent/skills/`）→ Tool 注册表 + builtin tools（读取 `git_bash_path` 和 `web_search` 配置，含 task/webfetch/websearch/question/skill 工具）→ SubAgentExecutor 创建并通过 `set_sub_executor` 延迟注入 TaskTool → FileIndexCache + FS 监听器（联动失效文件索引缓存）→ 网络状态监控器 → AppState 注册 → 自动监听活动工作区 → Skill 目录热重载监听 → 后台健康检查任务（LLM 每5分钟、Sidecar 每3分钟、工作区目录存在性每10秒）→ 网络监控启动
 - 应用安装了自定义 panic hook，将 panic 信息记录到日志文件并尝试发射 `runtime:error` 事件到前端

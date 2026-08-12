@@ -188,7 +188,6 @@
       "write_script": "写入脚本",
       "task": "子任务",
       "skill": "技能",
-      "lsp": "LSP",
       "web_fetch": "网络请求",
       "web_search": "网络搜索",
       "external_directory": "外部目录",
@@ -302,8 +301,7 @@
       "appearance": "外观设置",
       "shortcuts": "快捷键",
       "general": "通用设置",
-      "help": "帮助",
-      "lsp": "LSP 语言服务器"
+      "help": "帮助"
     },
     "general": {
       "sectionTitle": "基本设置",
@@ -479,8 +477,7 @@
         "task": "将子任务委托给子 Agent 执行。子 Agent 拥有独立的上下文，继承父 Agent 的系统提示、工作区和工具配置。适用于将复杂任务拆解为独立的子任务。支持两种模式：single（单一子任务）和 batch（并行批量子任务）。",
         "webfetch": "获取指定 URL 的网页内容并自动转换为 Markdown 格式。支持 HTML 页面、JSON API 和纯文本资源。适用于阅读在线文档、API 参考、技术文章等。内网地址和敏感端口自动屏蔽。",
         "websearch": "执行网络搜索并返回相关结果列表（标题、URL、摘要）。适用于查找最新信息、技术文档、API 用法等。搜索后端由配置决定（MCP/Tavily/SerpAPI）。",
-        "question": "向用户提问并等待回答。适用于需要用户决策、需求澄清或选项选择的场景。一次最多可提出 4 个问题，每个问题 2-4 个选项。用户回答后继续执行。",
-        "lsp": "LSP 代码智能工具（实验性）。通过 operation 参数指定操作类型：\n- definition：跳转到符号定义\n- references：查找符号引用\n- hover：获取悬停信息\n- diagnostics：获取文件诊断\n- document_symbol：获取文档符号列表\n- workspace_symbol：搜索工作区符号\n- implementation：跳转到实现\n- call_hierarchy：获取调用层级（direction=incoming|outgoing）"
+        "question": "向用户提问并等待回答。适用于需要用户决策、需求澄清或选项选择的场景。一次最多可提出 4 个问题，每个问题 2-4 个选项。用户回答后继续执行。"
       }
     },
     "templates": {
@@ -645,40 +642,6 @@
       "faqA5": "点击顶部栏的工作区选择器可添加、切换和管理工作区。每个工作区的文件和配置相互独立。",
       "faqQ6": "如何使用 Prompt 模板?",
       "faqA6": "在设置 > Prompt 模板中可创建和管理常用 Prompt 模板，支持变量占位符。在输入框中可通过模板选择器快速插入模板内容。"
-    },
-    "lsp": {
-      "title": "LSP 语言服务器状态",
-      "description": "查看和管理语言服务器进程",
-      "refresh": "刷新",
-      "restart": "重启",
-      "stopAll": "停止全部",
-      "language": "语言",
-      "status": "状态",
-      "command": "命令",
-      "pid": "进程 ID",
-      "serverName": "服务器",
-      "workspaceRoot": "工作区根目录",
-      "startedAt": "启动时间",
-      "noServers": "暂无已注册的语言服务器",
-      "statusRunning": "运行中",
-      "statusStopped": "已停止",
-      "statusStarting": "启动中",
-      "statusError": "错误",
-      "loadError": "加载 LSP 状态失败",
-      "restartSuccess": "语言服务器已重启",
-      "restartError": "重启失败",
-      "errorProgramNotFound": "未找到 LSP 服务器程序,请确保已安装该语言服务器并添加到 PATH",
-      "errorProcessExited": "LSP 服务器启动后立即退出,请检查工作区是否包含项目标识文件(如 Cargo.toml)",
-      "errorTimeout": "LSP 服务器响应超时,可能正在索引或工作区配置异常",
-      "stopAllSuccess": "已停止所有语言服务器",
-      "stopAllError": "停止失败",
-      "experimental": "实验性功能",
-      "enableLsp": "启用 LSP 语言服务器",
-      "enableLspDesc": "开启后可使用代码补全、诊断等语言服务功能",
-      "confirmTitle": "实验性功能确认",
-      "confirmContent": "LSP 语言服务器为实验性功能，开启后可能会影响应用性能或稳定性。是否确认开启？",
-      "confirmCancel": "取消",
-      "confirmEnable": "确认开启"
     }
   },
   "history": {

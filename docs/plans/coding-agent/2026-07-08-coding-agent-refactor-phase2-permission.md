@@ -50,7 +50,6 @@
 - SessionCompaction 上下文压缩 → 阶段 3
 - 子 Agent (task 工具) → 阶段 4
 - WebFetch/WebSearch → 阶段 4
-- LSP 集成 → 阶段 5
 
 ### 1.3 验收标准
 
@@ -231,8 +230,6 @@ pub enum PermissionType {
     Task,
     /// Skill 加载(阶段3实现)
     Skill,
-    /// LSP 调用(阶段5实现)
-    Lsp,
     /// 网页抓取:webfetch(阶段4实现)
     WebFetch,
     /// 网络搜索:websearch(阶段4实现)
@@ -262,7 +259,6 @@ impl fmt::Display for PermissionType {
             PermissionType::WriteScript => write!(f, "write_script"),
             PermissionType::Task => write!(f, "task"),
             PermissionType::Skill => write!(f, "skill"),
-            PermissionType::Lsp => write!(f, "lsp"),
             PermissionType::WebFetch => write!(f, "webfetch"),
             PermissionType::WebSearch => write!(f, "websearch"),
             PermissionType::ExternalDirectory => write!(f, "external_directory"),
@@ -287,7 +283,6 @@ impl PermissionType {
             "write_script" => Some(Self::WriteScript),
             "task" => Some(Self::Task),
             "skill" => Some(Self::Skill),
-            "lsp" => Some(Self::Lsp),
             "webfetch" => Some(Self::WebFetch),
             "websearch" => Some(Self::WebSearch),
             "external_directory" => Some(Self::ExternalDirectory),
@@ -1098,8 +1093,6 @@ impl PermissionRegistry {
             PermissionRule::new(RuleScope::Global, PermissionType::Task, "*".into(), PermissionAction::Allow),
             // Skill:默认允许(阶段3实现)
             PermissionRule::new(RuleScope::Global, PermissionType::Skill, "*".into(), PermissionAction::Allow),
-            // LSP:默认允许(阶段5实现)
-            PermissionRule::new(RuleScope::Global, PermissionType::Lsp, "*".into(), PermissionAction::Allow),
             // 询问用户:默认允许(低风险,仅向用户提问以获取澄清信息)
             PermissionRule::new(RuleScope::Global, PermissionType::Question, "*".into(), PermissionAction::Allow),
         ]
@@ -2385,11 +2378,6 @@ impl Default for AgentModeManager {
 - 过滤发生在 `tool_definitions` 构建阶段,不影响 `handler_registry` 的注册内容(Handler 始终注册在 AppState 中)
 - 过滤是"按需可见性控制",而非"启用/禁用",Handler 代码本身不做任何改动
 - 这保证了阶段 1 的"保留 Handler"设计与阶段 2 的"按模式过滤"设计的无缝衔接
-
-> **LSP 工具过滤策略说明**(阶段 5 相关):
-> 阶段 5 的 LSP 工具为只读代码理解工具,在 Plan/Build/Document 三种模式下均可用,**不参与模式过滤**。
-> 本任务的过滤逻辑仅针对文档 Handler(`docx`/`xlsx`/`pptx`/`pdf`),LSP 工具(`lsp`)不需要在此处特殊处理。
-> 阶段 5 实施 LSP 工具时,工具注册在 `tool_registry` 中,会自动出现在所有模式的 `tool_definitions` 里。
 
 **实施步骤**:
 
@@ -3888,13 +3876,7 @@ npm run build
 - 子 Agent 独立的 Doom loop 检测
 - **v1.1 新增**:子 Agent 继承父 Agent 的 AgentMode(若主 Agent 在 Document 模式,子 Agent 也能访问文档 Handler)
 
-### 6.3 与阶段 5 的衔接
-
-本阶段实现的权限系统将用于阶段 5 的 LSP 集成:
-- LSP 工具调用需要检查 `PermissionType::Lsp` 权限
-- LSP 默认全局允许,不支持细粒度规则
-
-### 6.4 待优化项(后续迭代)
+### 6.3 待优化项(后续迭代)
 
 - **规则导入导出**:支持 JSON 格式导入导出权限规则
 - **规则模板**:提供常见场景的规则模板(个人开发/团队协作/代码审计)
@@ -4028,6 +4010,5 @@ npm run build
 
 - **阶段 3(Skill 系统与上下文管理)**:Skill 工具将复用 `PermissionType::Skill` 进行权限控制
 - **阶段 4(子 Agent 与高级工具)**:Task 工具将复用 `PermissionType::Task` 进行权限控制,子 Agent 继承父 Agent 的权限上下文
-- **阶段 5(LSP 集成)**:LSP 工具默认 `allow`,但可通过规则配置为 `ask`
 
 权限系统是后续所有阶段的基础设施,必须确保本阶段完全实施并通过验收后再进入下一阶段。

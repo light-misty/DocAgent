@@ -111,12 +111,6 @@ export function extractToolPath(
     return undefined;
   }
 
-  // lsp：使用 file_path 参数
-  if (toolName === 'lsp') {
-    const p = f('file_path');
-    return p ? resolveAbsolutePath(p, workspaceRoot) : undefined;
-  }
-
   // list：默认列出当前工作目录
   if (toolName === 'list') {
     const p = f('path');

@@ -151,13 +151,6 @@ impl PermissionRegistry {
                 "*".into(),
                 PermissionAction::Allow,
             ),
-            // LSP:默认允许
-            PermissionRule::new(
-                RuleScope::Global,
-                PermissionType::Lsp,
-                "*".into(),
-                PermissionAction::Allow,
-            ),
             // 询问用户:默认允许(低风险,仅向用户提问以获取澄清信息)
             PermissionRule::new(
                 RuleScope::Global,

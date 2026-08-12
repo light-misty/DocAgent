@@ -243,154 +243,6 @@ impl Default for WebSearchConfig {
     }
 }
 
-/// LSP 集成配置
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct LspConfig {
-    /// 是否启用 LSP 集成
-    #[serde(default = "default_lsp_enabled")]
-    pub enabled: bool,
-    /// 实验性开关：控制是否将 LSP 工具暴露给 Agent（默认 false）
-    #[serde(default)]
-    pub experimental_enabled: bool,
-    /// LSP 服务器配置列表
-    #[serde(default = "default_lsp_servers")]
-    pub servers: Vec<LspServerConfigEntry>,
-    /// 缓存配置
-    #[serde(default)]
-    pub cache: LspCacheConfig,
-    /// 请求超时时间（秒）
-    #[serde(default = "default_lsp_request_timeout")]
-    pub request_timeout_seconds: u64,
-    /// 健康检查间隔（秒，0 表示禁用）
-    #[serde(default = "default_lsp_health_check_interval")]
-    pub health_check_interval_seconds: u64,
-}
-
-/// LSP 服务器配置项（用于配置文件）
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct LspServerConfigEntry {
-    /// 语言名称
-    pub language: String,
-    /// 启动命令
-    pub command: Vec<String>,
-    /// 根目录标识文件
-    #[serde(default)]
-    pub root_patterns: Vec<String>,
-    /// 初始化选项
-    #[serde(default)]
-    pub initialization_options: Option<serde_json::Value>,
-    /// 是否启用
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-}
-
-/// LSP 缓存配置
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct LspCacheConfig {
-    /// 是否启用缓存
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// 缓存 TTL（秒）
-    #[serde(default = "default_lsp_cache_ttl")]
-    pub ttl_seconds: u64,
-    /// 最大缓存条目数
-    #[serde(default = "default_lsp_cache_max_entries")]
-    pub max_entries: usize,
-}
-
-/// LSP 默认是否启用
-fn default_lsp_enabled() -> bool {
-    false
-}
-
-/// LSP 默认请求超时时间（秒）
-fn default_lsp_request_timeout() -> u64 {
-    30
-}
-
-/// LSP 默认健康检查间隔（秒）
-fn default_lsp_health_check_interval() -> u64 {
-    60
-}
-
-/// LSP 缓存默认 TTL（秒）
-fn default_lsp_cache_ttl() -> u64 {
-    300
-}
-
-/// LSP 缓存默认最大条目数
-fn default_lsp_cache_max_entries() -> usize {
-    500
-}
-
-/// LSP 默认服务器配置列表
-fn default_lsp_servers() -> Vec<LspServerConfigEntry> {
-    vec![
-        LspServerConfigEntry {
-            language: "rust".to_string(),
-            command: vec!["rust-analyzer".to_string()],
-            root_patterns: vec!["Cargo.toml".to_string()],
-            initialization_options: None,
-            enabled: true,
-        },
-        LspServerConfigEntry {
-            language: "python".to_string(),
-            command: vec!["pylsp".to_string()],
-            root_patterns: vec!["pyproject.toml".to_string(), "setup.py".to_string()],
-            initialization_options: None,
-            enabled: true,
-        },
-        LspServerConfigEntry {
-            language: "typescript".to_string(),
-            command: vec![
-                "typescript-language-server".to_string(),
-                "--stdio".to_string(),
-            ],
-            root_patterns: vec!["tsconfig.json".to_string(), "package.json".to_string()],
-            initialization_options: None,
-            enabled: true,
-        },
-        LspServerConfigEntry {
-            language: "go".to_string(),
-            command: vec!["gopls".to_string()],
-            root_patterns: vec!["go.mod".to_string()],
-            initialization_options: None,
-            enabled: true,
-        },
-    ]
-}
-
-/// 通用默认值：true
-fn default_true() -> bool {
-    true
-}
-
-impl Default for LspConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_lsp_enabled(),
-            experimental_enabled: false,
-            servers: default_lsp_servers(),
-            cache: LspCacheConfig::default(),
-            request_timeout_seconds: default_lsp_request_timeout(),
-            health_check_interval_seconds: default_lsp_health_check_interval(),
-        }
-    }
-}
-
-impl Default for LspCacheConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_true(),
-            ttl_seconds: default_lsp_cache_ttl(),
-            max_entries: default_lsp_cache_max_entries(),
-        }
-    }
-}
-
 /// 应用设置，包含所有可配置项
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -420,9 +272,6 @@ pub struct AppSettings {
     /// WebSearch 配置
     #[serde(default)]
     pub web_search: WebSearchConfig,
-    /// LSP 配置
-    #[serde(default)]
-    pub lsp: LspConfig,
 }
 
 /// Sidecar 默认请求超时时间（秒）
@@ -549,7 +398,5 @@ pub fn merge_with_defaults(
         git_bash_path: user_settings.git_bash_path.clone(),
         // WebSearch 配置直接保留用户设置（serde 反序列化时已用默认值填充缺失字段）
         web_search: user_settings.web_search.clone(),
-        // LSP 配置直接保留用户设置（serde 反序列化时已用默认值填充缺失字段）
-        lsp: user_settings.lsp.clone(),
     }
 }
