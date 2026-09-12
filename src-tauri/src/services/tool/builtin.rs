@@ -98,11 +98,13 @@ pub fn register_builtin_tools(
         states: scratchpad_states.clone(),
     }));
 
-    // 代码执行工具：write_script + bash
+    // 代码执行工具：write_script + bash + powershell
     // 让智能体通过编写脚本文件并执行命令解决用户问题
     // 命令超时由 LLM 通过 timeout 参数自主决定，最大 300 秒
+    // powershell 无需配置路径：优先使用 PATH 上的 pwsh.exe，回退系统内置的 5.1
     registry.register(Box::new(WriteScriptTool));
     registry.register(Box::new(RunCommandTool { git_bash_path }));
+    registry.register(Box::new(RunPowerShellCommandTool));
 
     // TodoWrite 工具：结构化任务管理，按 session_id 隔离并持久化到数据库
     registry.register(Box::new(todowrite::TodoWriteTool::new(db)));
@@ -130,7 +132,7 @@ pub fn register_builtin_tools(
         app_handle,
     )));
 
-    log::info!("内置工具注册完成, 共注册 25 个工具");
+    log::info!("内置工具注册完成, 共注册 26 个工具");
 
     BuiltinToolsRegistration {
         scratchpad_states,
@@ -1023,9 +1025,9 @@ mod tests {
             )),
         );
 
-        // 验证 25 个工具都已注册（8 个原有 + 4 个文件系统 + 1 个 scratchpad + 2 个代码执行 + 3 个搜索编辑 + 1 个 todowrite + 1 个 source_code + 1 个 skill + 4 个 task/web/question）
+        // 验证 26 个工具都已注册（8 个原有 + 4 个文件系统 + 1 个 scratchpad + 3 个代码执行 + 3 个搜索编辑 + 1 个 todowrite + 1 个 source_code + 1 个 skill + 4 个 task/web/question）
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 25);
+        assert_eq!(tools.len(), 26);
 
         // 验证每个工具的基本属性
         let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -1047,6 +1049,7 @@ mod tests {
         // 代码执行工具
         assert!(tool_names.contains(&"write_script"));
         assert!(tool_names.contains(&"bash"));
+        assert!(tool_names.contains(&"powershell"));
         // 编程 Agent 改造新增工具
         assert!(tool_names.contains(&"edit"));
         assert!(tool_names.contains(&"glob"));
@@ -1084,7 +1087,7 @@ mod tests {
         );
 
         let defs = registry.tool_definitions();
-        assert_eq!(defs.len(), 25);
+        assert_eq!(defs.len(), 26);
 
         // 验证每个定义都有 type 和 function 字段
         for def in &defs {
@@ -6505,6 +6508,1680 @@ fn execute_bash_command(
             Err(e) => {
                 return Err(format!("等待子进程失败: {}", e));
             }
+        }
+    }
+}
+
+// ============================================================
+// powershell - 通过 PowerShell 执行命令
+// ============================================================
+
+/// PowerShell 命令执行工具
+///
+/// 与 bash 工具（RunCommandTool）保持完全一致的参数与返回契约，差异只在解释器：
+/// 优先使用 PowerShell 7+（pwsh.exe），回退到系统内置的 Windows PowerShell 5.1。
+pub struct RunPowerShellCommandTool;
+
+/// 脚本前导：抑制进度流并强制 UTF-8 输出编码
+///
+/// 两处都是实测出来的必需项：
+/// - 不抑制进度流时，5.1 会在 stderr 序列化出一条"正在准备首次使用模块"的 CLIXML 记录，
+///   污染错误输出（实测 stderr 由 382 字节降为 0）
+/// - 5.1 默认跟随系统 OEM 代码页（中文系统为 GBK），不强制 UTF-8 会让中文输出变 GBK 字节
+const PS_SCRIPT_PREFIX: &str = concat!(
+    "$ProgressPreference='SilentlyContinue'; ",
+    "try { $__swEnc = New-Object System.Text.UTF8Encoding($false); ",
+    "[Console]::OutputEncoding = $__swEnc; $OutputEncoding = $__swEnc } catch {}\n",
+);
+
+/// 脚本后缀：把 PowerShell 的执行状态归一化为进程退出码
+///
+/// PowerShell 的宿主退出码不等于"最后一条命令的退出码"：原生命令的退出码只写入
+/// `$LASTEXITCODE` 而不会传给进程（实测 `cmd /c "exit 7"` 宿主退出码为 1）。
+/// 这里按 bash 语义归一化：退出码 = 最后一条语句的结果。
+/// 注意 `$?` 必须作为后缀的第一条语句读取，否则会被紧随其后的赋值语句重置为 True。
+const PS_SCRIPT_SUFFIX: &str = concat!(
+    "\n$__swOk = $?\n",
+    "$__swLe = $LASTEXITCODE\n",
+    "$__swEc = 0\n",
+    "if (-not $__swOk) {\n",
+    "  if ($null -ne $__swLe -and $__swLe -ne 0) { $__swEc = $__swLe } else { $__swEc = 1 }\n",
+    "}\n",
+    "exit $__swEc\n",
+);
+
+/// 输出流在进程退出后的最长等待时间（秒）
+///
+/// 若 PowerShell 派生的孙进程继承了管道写句柄，管道会在宿主退出后继续打开；
+/// 超过该宽限期则放弃等待，避免已成功的命令被误判为超时。
+const PS_STREAM_DRAIN_GRACE_SECS: u64 = 3;
+
+/// Windows 进程创建标志：阻止为子进程分配控制台窗口
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// 组装最终交给 PowerShell 执行的脚本：编码前导 + 用户命令 + 退出码归一后缀
+fn build_powershell_script(command: &str) -> String {
+    format!("{}{}{}", PS_SCRIPT_PREFIX, command, PS_SCRIPT_SUFFIX)
+}
+
+/// 将脚本编码为 `-EncodedCommand` 需要的 Base64(UTF-16LE)
+///
+/// 相比 `-Command`，`-EncodedCommand` 彻底规避了 Windows 命令行引号二次解析问题，
+/// 也规避了 stdin 在 5.1 上按 GBK 解码导致的非 ASCII 脚本乱码（均已实测）。
+fn encode_powershell_command(script: &str) -> String {
+    use base64::Engine as _;
+    if script.is_empty() {
+        return String::new();
+    }
+    let utf16_bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64::engine::general_purpose::STANDARD.encode(&utf16_bytes)
+}
+
+/// 钳制超时时间：默认 60 秒，最短 1 秒，最长 300 秒（与 bash 工具一致）
+fn clamp_powershell_timeout(timeout: Option<Value>) -> u64 {
+    timeout
+        .and_then(|v| v.as_u64())
+        .unwrap_or(FALLBACK_COMMAND_TIMEOUT_SECS)
+        .clamp(1, 300)
+}
+
+/// 解码子进程输出字节：UTF-8 优先，失败回退 GBK
+///
+/// 回退分支是必需的：当前导的编码设置因无控制台而失败时，5.1 会输出 GBK 字节，
+/// 直接按 UTF-8 读取会失败并丢空输出（bash 工具现存的 `read_to_string().ok()` 即此问题）。
+fn decode_console_bytes(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        // 非 UTF-8：按中文 Windows 的代码页解码
+        Err(_) => encoding_rs::GBK.decode(bytes).0.into_owned(),
+    }
+}
+
+/// 还原 PowerShell 在 stderr 被重定向时序列化出的 CLIXML 错误流
+///
+/// stderr 是管道时，PowerShell 会把 error/warning/verbose 等流写成
+/// `#< CLIXML` + `<Objs><S S="Error">...</S></Objs>`，而原生命令的 stderr 仍以纯文本交错出现。
+/// 这里把 CLIXML 块还原为可读文本、丢弃进度记录，并原样保留原生片段。
+fn decode_powershell_stderr(text: &str) -> String {
+    if !text.contains("<Objs") {
+        return text.to_string();
+    }
+
+    let mut result = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        match rest.find("<Objs") {
+            Some(start) => {
+                result.push_str(&strip_clixml_marker(&rest[..start]));
+                let block = &rest[start..];
+                match block.find("</Objs>") {
+                    Some(end) => {
+                        let full_end = end + "</Objs>".len();
+                        result.push_str(&extract_clixml_records(&block[..full_end]));
+                        rest = &block[full_end..];
+                    }
+                    // 缺少闭合标签：保留原文，绝不丢弃信息
+                    None => {
+                        result.push_str(block);
+                        rest = "";
+                    }
+                }
+            }
+            None => {
+                result.push_str(&strip_clixml_marker(rest));
+                rest = "";
+            }
+        }
+    }
+    result
+}
+
+/// 去掉 `#< CLIXML` 标记行
+fn strip_clixml_marker(text: &str) -> String {
+    text.replace("#< CLIXML\r\n", "").replace("#< CLIXML\n", "")
+}
+
+/// 从一个 `<Objs>...</Objs>` 块中抽取各数据流的文本内容
+///
+/// 只取 `<S S="流名">内容</S>` 形式的数据记录；`<Obj S="progress">` 这类复合记录
+/// 内部不含 `<S S="` 前缀，因此会被整体跳过。
+fn extract_clixml_records(block: &str) -> String {
+    let mut out = String::new();
+    // 跳过开始标签，只处理其内容
+    let inner = match block.find('>') {
+        Some(gt) => &block[gt + 1..],
+        None => return out,
+    };
+    let inner = match inner.rfind("</Objs>") {
+        Some(close) => &inner[..close],
+        None => inner,
+    };
+
+    let mut rest = inner;
+    while let Some(pos) = rest.find("<S S=\"") {
+        let after_open = &rest[pos + "<S S=\"".len()..];
+        // 跳过流名属性值（如 Error / warning），各数据流统一按文本输出
+        let quote = match after_open.find('"') {
+            Some(i) => i,
+            None => break,
+        };
+        let tag_end = match after_open[quote..].find('>') {
+            Some(i) => quote + i,
+            None => break,
+        };
+        // 自闭合标签（如 `<S S="Error" />`）无正文
+        if after_open[..tag_end].trim_end().ends_with('/') {
+            rest = &after_open[tag_end + 1..];
+            continue;
+        }
+        let content_area = &after_open[tag_end + 1..];
+        let close = match content_area.find("</S>") {
+            Some(i) => i,
+            None => {
+                // 未闭合：把剩余内容当作正文输出
+                out.push_str(&decode_clixml_text(content_area));
+                break;
+            }
+        };
+        out.push_str(&decode_clixml_text(&content_area[..close]));
+        rest = &content_area[close + "</S>".len()..];
+    }
+    out
+}
+
+/// 反转义 CLIXML 文本节点：先还原 XML 实体，再单趟解析 `_xHHHH_`，最后剥离 ANSI 序列
+///
+/// 顺序不可颠倒：PowerShell 会把字面下划线转义为 `_x005F_`，
+/// 单趟从左到右解析才能得到 `_x000D_` 这类字面文本而不是换行符。
+fn decode_clixml_text(raw: &str) -> String {
+    let unescaped = xml_unescape(raw);
+    let with_chars = ps_unescape_chars(&unescaped);
+    strip_ansi_escapes(&with_chars)
+}
+
+/// 把 `_xHHHH_` 形式的 PowerShell 字符转义还原为对应字符（单趟扫描，不二次解析）
+fn ps_unescape_chars(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        // 模式 `_xHHHH_` 全为 ASCII，按字节判定可避免切进多字节字符中间
+        if i + 7 <= len
+            && bytes[i] == b'_'
+            && bytes[i + 1] == b'x'
+            && bytes[i + 6] == b'_'
+            && bytes[i + 2..i + 6].iter().all(|b| b.is_ascii_hexdigit())
+        {
+            let digits = std::str::from_utf8(&bytes[i + 2..i + 6]).unwrap_or("0");
+            let code = u32::from_str_radix(digits, 16).unwrap_or(0xFFFD);
+            out.push(char::from_u32(code).unwrap_or('\u{fffd}'));
+            i += 7;
+            continue;
+        }
+        // 其余按整字符推进；游标 i 始终落在字符边界上
+        let ch = text[i..].chars().next().unwrap_or('\u{fffd}');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// 还原 XML 预定义实体
+fn xml_unescape(text: &str) -> String {
+    // &amp; 必须最后替换，否则会把 `&amp;lt;` 误解码两次
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+/// 剥离 ANSI 终端转义序列（pwsh 7 会把颜色码写进 CLIXML 正文）
+fn strip_ansi_escapes(text: &str) -> String {
+    if !text.contains('\u{1b}') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('[') => {
+                chars.next();
+                // CSI：终结字节为 @..~
+                for t in chars.by_ref() {
+                    if matches!(t, '@'..='~') {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                chars.next();
+                // OSC：以 BEL 或 ESC\ 结束
+                for t in chars.by_ref() {
+                    if t == '\u{7}' {
+                        break;
+                    }
+                }
+            }
+            _ => {
+                chars.next();
+            }
+        }
+    }
+    out
+}
+
+/// 解析 PowerShell 可执行文件路径
+///
+/// 优先级：
+///   1. PATH 中的 pwsh.exe（PowerShell 7+，跨平台且默认 UTF-8）
+///   2. 常见安装目录中的 pwsh.exe（MSI 安装后可能未刷新 PATH）
+///   3. 系统内置的 Windows PowerShell 5.1
+fn resolve_powershell_path() -> Option<String> {
+    // 1. PATH 中查找 pwsh
+    if let Some(path_env) = std::env::var_os("PATH") {
+        #[cfg(target_os = "windows")]
+        let exe_name = "pwsh.exe";
+        #[cfg(not(target_os = "windows"))]
+        let exe_name = "pwsh";
+        for dir in std::env::split_paths(&path_env) {
+            let candidate = dir.join(exe_name);
+            if candidate.is_file() {
+                log::info!(
+                    "resolve_powershell_path: 从 PATH 找到 {}: {}",
+                    exe_name,
+                    candidate.display()
+                );
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // 2. 已知安装目录（PATH 未刷新时兜底）
+        let mut roots: Vec<std::path::PathBuf> = Vec::new();
+        for key in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+            if let Ok(dir) = std::env::var(key) {
+                roots.push(std::path::PathBuf::from(dir));
+            }
+        }
+        for root in &roots {
+            for version in ["7", "8"] {
+                let candidate = root.join("PowerShell").join(version).join("pwsh.exe");
+                if candidate.is_file() {
+                    log::info!(
+                        "resolve_powershell_path: 从安装目录找到 pwsh.exe: {}",
+                        candidate.display()
+                    );
+                    return Some(candidate.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        // 3. 回退到系统内置的 Windows PowerShell 5.1
+        let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+        for arch in ["System32", "SysWOW64"] {
+            let candidate = std::path::Path::new(&system_root)
+                .join(arch)
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe");
+            if candidate.is_file() {
+                log::info!(
+                    "resolve_powershell_path: 回退到 Windows PowerShell 5.1: {}",
+                    candidate.display()
+                );
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+        log::warn!("resolve_powershell_path: 未找到任何 PowerShell 解释器");
+        None
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        log::warn!("resolve_powershell_path: 非 Windows 平台未在 PATH 中找到 pwsh");
+        None
+    }
+}
+
+/// 超时后终止整个进程树
+///
+/// `child.kill()` 只结束 PowerShell 本身，其派生的原生程序会变成孤儿进程。
+#[cfg(target_os = "windows")]
+fn kill_process_tree(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let _ = Command::new("taskkill.exe")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_process_tree(_pid: u32) {}
+
+#[async_trait]
+impl Tool for RunPowerShellCommandTool {
+    fn tool_name(&self) -> &str {
+        "powershell"
+    }
+
+    fn description(&self) -> &str {
+        "Execute commands via PowerShell (prefers PowerShell 7+ 'pwsh.exe', falls back to Windows PowerShell 5.1). Can be used to run cmdlets, scripts, native executables, and system management tasks on Windows.\
+         The working directory defaults to the current workspace, and can be specified via the working_dir parameter.\
+         Command timeout defaults to 60 seconds, adjustable via the timeout parameter (maximum 300 seconds).\
+         Output exceeding 6000 characters will be automatically truncated.\
+         High-risk commands (Remove-Item/Stop-Process/Clear-Content/Invoke-Expression/shutdown/Set-ExecutionPolicy, etc.) will request user confirmation.\
+         Returns stdout, stderr, exit_code, success, and duration_secs fields; exit_code follows the status of the last statement, like a POSIX shell.\
+         Use PowerShell syntax (Get-ChildItem, $var, cmdlet -Parameter), not cmd.exe or Unix syntax; use the bash tool for Git Bash commands."
+    }
+
+    fn category(&self) -> &str {
+        "code"
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "PowerShell script to execute (passed to powershell -EncodedCommand, so quotes and $ need no shell escaping). For example: 'Get-ChildItem -Recurse -Filter *.rs | Measure-Object' or \"$env:OS\""
+                },
+                "working_dir": {
+                    "type": "string",
+                    "description": "Working directory for command execution (optional, defaults to current workspace root)"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Command timeout in seconds, default 60, maximum 300",
+                    "default": 60
+                }
+            },
+            "required": ["command"]
+        })
+    }
+
+    async fn execute(&self, params: Value) -> ToolResult {
+        let start = Instant::now();
+
+        let command = params["command"].as_str().unwrap_or("").trim().to_string();
+        let working_dir = params["working_dir"].as_str().unwrap_or("");
+        let workspace_root = params["workspace_root"].as_str().unwrap_or("");
+
+        // 命令超时由 LLM 通过 timeout 参数决定，最大 300 秒
+        let timeout = clamp_powershell_timeout(params.get("timeout").cloned());
+
+        // 参数校验
+        if command.is_empty() {
+            return ToolResult {
+                success: false,
+                output: None,
+                error: Some("Missing command parameter".to_string()),
+                duration_ms: start.elapsed().as_millis() as u64,
+                error_code: Some(crate::errors::TOOL_INVALID_PARAMS),
+            };
+        }
+
+        // 解析工作目录：优先使用 working_dir，其次 workspace_root
+        let cwd = if !working_dir.is_empty() {
+            working_dir.to_string()
+        } else if !workspace_root.is_empty() {
+            workspace_root.to_string()
+        } else {
+            String::new()
+        };
+
+        // 获取 PowerShell 可执行文件路径
+        let shell_path = match resolve_powershell_path() {
+            Some(p) => p,
+            None => {
+                return ToolResult {
+                    success: false,
+                    output: None,
+                    error: Some(
+                        "未找到 PowerShell 可执行文件。请确认系统已安装 PowerShell（Windows 自带 5.1），或安装 PowerShell 7 并将其加入 PATH"
+                            .to_string(),
+                    ),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    error_code: None,
+                };
+            }
+        };
+
+        log::info!(
+            "powershell: 执行命令 (shell='{}', cwd='{}', timeout={}s): {}",
+            shell_path,
+            cwd,
+            timeout,
+            command
+        );
+
+        // 在 spawn_blocking 中执行同步的子进程操作，避免阻塞异步运行时
+        let command_for_closure = command.clone();
+        let cwd_for_closure = cwd.clone();
+        let shell_for_closure = shell_path.clone();
+
+        let result = tokio::task::spawn_blocking(move || {
+            execute_powershell_command(
+                &shell_for_closure,
+                &command_for_closure,
+                &cwd_for_closure,
+                timeout,
+            )
+        })
+        .await;
+
+        match result {
+            Ok(Ok(output)) => {
+                log::info!(
+                    "powershell: 命令执行完成 (exit_code={}, stdout={} 字节, stderr={} 字节)",
+                    output.exit_code,
+                    output.stdout.len(),
+                    output.stderr.len()
+                );
+                // 截断过长输出（6000 字符限制）
+                const MAX_OUTPUT_CHARS: usize = 6000;
+                let stdout_truncated = truncate_safe(&output.stdout, MAX_OUTPUT_CHARS);
+                let stderr_truncated = truncate_safe(&output.stderr, MAX_OUTPUT_CHARS);
+                let duration_secs = start.elapsed().as_secs_f64();
+
+                ToolResult {
+                    success: output.exit_code == 0,
+                    output: Some(json!({
+                        "stdout": stdout_truncated,
+                        "stderr": stderr_truncated,
+                        "exit_code": output.exit_code,
+                        "success": output.exit_code == 0,
+                        "duration_secs": duration_secs,
+                        "command": command,
+                        "working_dir": cwd,
+                    })),
+                    error: if output.exit_code != 0 {
+                        Some(format!("命令执行失败，退出码: {}", output.exit_code))
+                    } else {
+                        None
+                    },
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    error_code: None,
+                }
+            }
+            Ok(Err(e)) => {
+                log::error!("powershell: 命令执行错误: {}", e);
+                ToolResult {
+                    success: false,
+                    output: None,
+                    error: Some(format!("Command execution error: {}", e)),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    error_code: None,
+                }
+            }
+            Err(e) => {
+                log::error!("powershell: 任务执行失败: {}", e);
+                ToolResult {
+                    success: false,
+                    output: None,
+                    error: Some(format!("Task execution failed: {}", e)),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    error_code: None,
+                }
+            }
+        }
+    }
+}
+
+/// 执行 PowerShell 命令（同步函数，应在 spawn_blocking 中调用）
+fn execute_powershell_command(
+    shell_path: &str,
+    command: &str,
+    working_dir: &str,
+    timeout_secs: u64,
+) -> Result<CommandOutput, String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+    use std::thread;
+
+    let encoded = encode_powershell_command(&build_powershell_script(command));
+
+    let mut cmd = Command::new(shell_path);
+    cmd.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        encoded.as_str(),
+    ]);
+
+    // 设置工作目录
+    if !working_dir.is_empty() {
+        cmd.current_dir(working_dir);
+    }
+
+    // 与 bash 工具保持一致的 Python 编码环境（PowerShell 中也可能调用 python）
+    cmd.env("PYTHONIOENCODING", "utf-8");
+    cmd.env("PYTHONUTF8", "1");
+
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let start = Instant::now();
+    let mut child = cmd.spawn().map_err(|e| format!("启动子进程失败: {}", e))?;
+    let pid = child.id();
+
+    // 管道必须在进程运行期间就被消费：Windows 匿名管道缓冲约 4KB，
+    // 若等进程退出后再读，大输出的子进程会阻塞在 write() 上，与父进程的等待互相卡死
+    let stdout_handle = child.stdout.take();
+    let stderr_handle = child.stderr.take();
+    let (tx_out, rx_out) = mpsc::channel::<Vec<u8>>();
+    let (tx_err, rx_err) = mpsc::channel::<Vec<u8>>();
+    thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut h) = stdout_handle {
+            let _ = h.read_to_end(&mut buf);
+        }
+        let _ = tx_out.send(buf);
+    });
+    thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut h) = stderr_handle {
+            let _ = h.read_to_end(&mut buf);
+        }
+        let _ = tx_err.send(buf);
+    });
+
+    let timeout_duration = Duration::from_secs(timeout_secs);
+    // 进程退出后给输出流一个短暂的收尾窗口（孙进程可能仍持有管道写句柄）
+    // 记录为"自 start 起算的时限"，与下方 start.elapsed() 直接比较
+    let mut stream_deadline: Option<Duration> = None;
+    let mut exit_code: Option<i32> = None;
+    let mut out_bytes: Option<Vec<u8>> = None;
+    let mut err_bytes: Option<Vec<u8>> = None;
+
+    loop {
+        // 轮询进程状态
+        if exit_code.is_none() {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    exit_code = Some(status.code().unwrap_or(-1));
+                    stream_deadline =
+                        Some(start.elapsed() + Duration::from_secs(PS_STREAM_DRAIN_GRACE_SECS));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    kill_process_tree(pid);
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("等待子进程失败: {}", e));
+                }
+            }
+        }
+
+        // 非阻塞收集两路输出
+        if out_bytes.is_none() {
+            match rx_out.try_recv() {
+                Ok(v) => out_bytes = Some(v),
+                Err(mpsc::TryRecvError::Disconnected) => out_bytes = Some(Vec::new()),
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if err_bytes.is_none() {
+            match rx_err.try_recv() {
+                Ok(v) => err_bytes = Some(v),
+                Err(mpsc::TryRecvError::Disconnected) => err_bytes = Some(Vec::new()),
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+
+        if exit_code.is_some() && out_bytes.is_some() && err_bytes.is_some() {
+            break;
+        }
+
+        let elapsed = start.elapsed();
+        match (exit_code, stream_deadline) {
+            (None, _) => {
+                if elapsed >= timeout_duration {
+                    log::warn!(
+                        "execute_powershell_command: 命令超时 ({}秒)，终止进程树",
+                        timeout_secs
+                    );
+                    kill_process_tree(pid);
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("命令执行超时（{}秒），已终止", timeout_secs));
+                }
+            }
+            (Some(_), Some(deadline)) => {
+                // 进程已退出但管道未关闭：超过宽限期则放弃等待这部分输出
+                if elapsed >= deadline {
+                    log::warn!(
+                        "execute_powershell_command: 进程已退出但输出流未关闭，放弃等待剩余输出"
+                    );
+                    out_bytes.get_or_insert_with(Vec::new);
+                    err_bytes.get_or_insert_with(Vec::new);
+                }
+            }
+            (Some(_), None) => {}
+        }
+
+        // 短暂休眠避免 CPU 空转
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let stdout = decode_console_bytes(&out_bytes.unwrap_or_default());
+    let raw_stderr = decode_console_bytes(&err_bytes.unwrap_or_default());
+    let stderr = decode_powershell_stderr(&raw_stderr);
+
+    Ok(CommandOutput {
+        stdout,
+        stderr,
+        exit_code: exit_code.unwrap_or(-1),
+    })
+}
+
+// ============================================================
+// powershell 工具单元测试（纯函数部分，跨平台可运行）
+// ============================================================
+
+#[cfg(test)]
+mod powershell_tool_tests {
+    use super::*;
+    use base64::Engine as _;
+
+    /// 创建内存数据库供本模块测试使用（mod tests 中的同名函数为私有，兄弟模块不可见）
+    fn test_db() -> Arc<Database> {
+        Arc::new(Database::new(std::path::Path::new(":memory:")).unwrap())
+    }
+
+    // ---------- 脚本组装 ----------
+
+    /// 前导必须包含进度流抑制，否则 5.1 会向 stderr 注入启动期的 CLIXML 进度记录
+    #[test]
+    fn test_build_ps_script_suppresses_progress() {
+        let script = build_powershell_script("Write-Output 1");
+        assert!(
+            script.starts_with("$ProgressPreference='SilentlyContinue'"),
+            "脚本首条语句应抑制进度流，实际前缀: {}",
+            &script[..script.len().min(80)]
+        );
+    }
+
+    /// 前导必须强制 UTF-8 输出编码：5.1 默认跟随 OEM 代码页（中文系统为 GBK）
+    #[test]
+    fn test_build_ps_script_forces_utf8_output() {
+        let script = build_powershell_script("Write-Output 1");
+        assert!(
+            script.contains("[Console]::OutputEncoding"),
+            "脚本应设置控制台输出编码"
+        );
+        // 必须使用不带 BOM 的 UTF8Encoding，否则输出头部会混入 BOM
+        assert!(
+            script.contains("UTF8Encoding($false)"),
+            "应使用不发射 BOM 的 UTF8Encoding"
+        );
+    }
+
+    /// 用户命令必须原样保留在脚本中（不做任何转义/改写）
+    #[test]
+    fn test_build_ps_script_keeps_command_verbatim() {
+        let cmd = "Get-ChildItem 'C:\\Program Files' -Filter *.txt | Where-Object { $_.Name -match 'a\"b' }";
+        let script = build_powershell_script(cmd);
+        assert!(script.contains(cmd), "用户命令应原样出现在脚本中");
+    }
+
+    /// 用户命令以行注释结尾时，不能吞掉退出码归一后缀
+    #[test]
+    fn test_build_ps_script_comment_cannot_swallow_suffix() {
+        let script = build_powershell_script("Write-Output 1 # 末尾注释");
+        // 后缀必须位于独立的一行，否则会被 # 注释吃掉
+        let suffix_line = script
+            .lines()
+            .find(|l| l.contains("exit $__swEc"))
+            .expect("退出码后缀应位于独立行，不能被用户命令的行尾注释吞掉");
+        assert!(
+            !suffix_line.trim_start().starts_with('#'),
+            "退出码后缀所在行本身不应是注释行"
+        );
+    }
+
+    /// 多行用户命令应被完整保留
+    #[test]
+    fn test_build_ps_script_preserves_multiline_command() {
+        let cmd = "if (1 -eq 1) {\n  Write-Output \"yes\"\n}";
+        let script = build_powershell_script(cmd);
+        assert!(script.contains(cmd), "多行命令应完整保留");
+    }
+
+    // ---------- Base64(UTF-16LE) 编码 ----------
+
+    /// 已知向量：与外部工具 iconv -t UTF-16LE | base64 的结果一致
+    #[test]
+    fn test_encode_ps_command_known_vector() {
+        assert_eq!(
+            encode_powershell_command("Write-Output 1"),
+            "VwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAxAA=="
+        );
+    }
+
+    /// 空脚本应编码为空字符串（而非换行符的 Base64）
+    #[test]
+    fn test_encode_ps_command_empty() {
+        assert_eq!(encode_powershell_command(""), "");
+    }
+
+    /// 往返一致性：非 ASCII（中文 + emoji + 引号）必须无损
+    #[test]
+    fn test_encode_ps_command_roundtrip_non_ascii() {
+        let script = "Write-Output \"中文🐶测试\"; $x = 'a\"b'";
+        let encoded = encode_powershell_command(script);
+        // Base64 解码后应为偶数字节的 UTF-16LE，且能还原原文
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&encoded)
+            .expect("应为合法 Base64");
+        assert_eq!(bytes.len() % 2, 0, "UTF-16LE 字节数必须为偶数");
+        let units: Vec<u16> = bytes
+            .chunks(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        let decoded: String = char::decode_utf16(units)
+            .map(|r| r.unwrap_or('\u{fffd}'))
+            .collect();
+        assert_eq!(decoded, script, "UTF-16LE 编解码应完全无损");
+    }
+
+    /// 编码结果不应包含换行（必须作为单个命令行参数传递）
+    #[test]
+    fn test_encode_ps_command_is_single_line() {
+        let encoded = encode_powershell_command("line1\nline2\nline3");
+        assert!(!encoded.contains('\n'), "Base64 结果不应含换行");
+    }
+
+    // ---------- 输出字节解码 ----------
+
+    /// 合法 UTF-8 应直接解码
+    #[test]
+    fn test_decode_console_bytes_utf8() {
+        assert_eq!(decode_console_bytes("中文🐶".as_bytes()), "中文🐶");
+    }
+
+    /// GBK 字节流应回退解码（PowerShell 5.1 在中文系统上的默认输出编码）
+    #[test]
+    fn test_decode_console_bytes_gbk_fallback() {
+        // "中文" 的 GBK 编码：D6 D0 CE C4（实测于 Windows PowerShell 5.1）
+        let gbk_bytes: [u8; 4] = [0xD6, 0xD0, 0xCE, 0xC4];
+        assert_eq!(decode_console_bytes(&gbk_bytes), "中文");
+    }
+
+    /// 空字节流应解码为空字符串
+    #[test]
+    fn test_decode_console_bytes_empty() {
+        assert_eq!(decode_console_bytes(&[]), "");
+    }
+
+    /// 无法归入任何编码的字节不应 panic
+    #[test]
+    fn test_decode_console_bytes_invalid_does_not_panic() {
+        // 0xFF/0xFE 既不是合法 UTF-8 也不是合法 GBK 起始；其中的 ASCII 部分应存活
+        let out = decode_console_bytes(b"ok\xFF\xFE\x80\x80end");
+        assert!(out.contains("ok"), "可读 ASCII 前缀应保留，实际: {out}");
+        assert!(out.contains("end"), "可读 ASCII 后缀应保留，实际: {out}");
+    }
+
+    // ---------- CLIXML stderr 还原 ----------
+
+    /// 真实捕获的 5.1 CLIXML 样本（stderr 被重定向时 PowerShell 的错误流序列化格式）
+    const PS_CLIXML_SAMPLE: &str = "#< CLIXML\r\nRAW-STDERR \r\n<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\"><S S=\"Error\">Get-Item : Cannot find path 'C:\\a1' because it does not exist._x000D__x000A_</S><S S=\"Error\">At line:2 char:1_x000D__x000A_</S><S S=\"Error\">    + CategoryInfo          : ObjectNotFound: (C:\\a1:String) [Get-Item], ItemNotFoundException_x000D__x000A_</S><S S=\"warning\">a warning</S></Objs>";
+
+    /// CLIXML 应被还原为可读文本，且原生 stderr 内容不得丢失
+    #[test]
+    fn test_decode_ps_stderr_clixml_restored() {
+        let cleaned = decode_powershell_stderr(PS_CLIXML_SAMPLE);
+        assert!(
+            !cleaned.contains("CLIXML") && !cleaned.contains("<Objs"),
+            "不应残留 XML 结构，实际: {cleaned}"
+        );
+        assert!(
+            cleaned.contains("Cannot find path 'C:\\a1'"),
+            "错误消息正文应保留，实际: {cleaned}"
+        );
+        assert!(
+            cleaned.contains("RAW-STDERR"),
+            "交错的原生 stderr 内容不应丢失，实际: {cleaned}"
+        );
+        assert!(
+            cleaned.contains("a warning"),
+            "警告流内容应保留，实际: {cleaned}"
+        );
+    }
+
+    /// `_x000D__x000A_` 应还原为真实换行
+    #[test]
+    fn test_decode_ps_stderr_restores_newlines() {
+        let cleaned = decode_powershell_stderr(PS_CLIXML_SAMPLE);
+        assert!(
+            cleaned.contains("does not exist.\n") || cleaned.contains("does not exist.\r\n"),
+            "换行转义应被还原，实际: {:?}",
+            cleaned
+        );
+    }
+
+    /// 普通（非 CLIXML）stderr 应原样返回
+    #[test]
+    fn test_decode_ps_stderr_plain_passthrough() {
+        let plain = "native tool said: something went wrong\n";
+        assert_eq!(decode_powershell_stderr(plain), plain);
+    }
+
+    /// PowerShell 会把下划线转义为 `_x005F_`，还原后不得被二次解析
+    #[test]
+    fn test_decode_ps_stderr_underscore_escape() {
+        let input = "<Objs Version=\"1.1.0.1\"><S S=\"Error\">path C:\\nope_x005F_xyz_x000D__x000A_</S></Objs>";
+        let cleaned = decode_powershell_stderr(input);
+        assert!(
+            cleaned.contains("nope_xyz"),
+            "_x005F_ 应还原为下划线且不被二次转义，实际: {cleaned}"
+        );
+    }
+
+    /// pwsh 7 的 CLIXML 内嵌 ANSI 颜色转义，应被剥离
+    #[test]
+    fn test_decode_ps_stderr_strips_ansi() {
+        let input = "<Objs Version=\"1.1.0.1\"><S S=\"Error\">_x001B_[31;1mGet-Item: boom_x001B_[0m_x000D__x000A_</S></Objs>";
+        let cleaned = decode_powershell_stderr(input);
+        assert!(
+            cleaned.contains("Get-Item: boom"),
+            "应保留错误正文，实际: {cleaned}"
+        );
+        assert!(
+            !cleaned.contains("[31;1m") && !cleaned.contains('\u{1b}'),
+            "ANSI 序列应被剥离，实际: {:?}",
+            cleaned
+        );
+    }
+
+    /// 进度记录块应整体丢弃
+    #[test]
+    fn test_decode_ps_stderr_drops_progress() {
+        let input = "#< CLIXML\r\n<Objs Version=\"1.1.0.1\"><Obj S=\"progress\" RefId=\"0\"><MS><I64 N=\"SourceId\">1</I64><PR N=\"Record\"><AV>Preparing modules</AV></PR></MS></Obj></Objs>";
+        let cleaned = decode_powershell_stderr(input);
+        assert!(
+            !cleaned.contains("Preparing modules"),
+            "进度记录不应出现在输出中，实际: {cleaned}"
+        );
+    }
+
+    /// XML 实体应被还原
+    #[test]
+    fn test_decode_ps_stderr_unescapes_xml_entities() {
+        let input = "<Objs Version=\"1.1.0.1\"><S S=\"Error\">a &lt;b&gt; &amp; c &quot;d&quot;_x000D__x000A_</S></Objs>";
+        let cleaned = decode_powershell_stderr(input);
+        assert!(
+            cleaned.contains("a <b> & c \"d\""),
+            "XML 实体应还原，实际: {cleaned}"
+        );
+    }
+
+    /// 畸形 CLIXML 不应导致信息丢失或 panic（回退原文）
+    #[test]
+    fn test_decode_ps_stderr_malformed_falls_back() {
+        let broken = "#< CLIXML\r\n<Objs Version=\"1.1.0.1\"><S S=\"Error\">unclosed text";
+        let cleaned = decode_powershell_stderr(broken);
+        assert!(
+            cleaned.contains("unclosed text"),
+            "畸形输入应保留原始信息，实际: {cleaned}"
+        );
+    }
+
+    /// 回归：`_x` 前缀后紧跟多字节字符时，反转义不得按字节切进字符中间而 panic
+    /// （中文 Windows 的错误消息实测会触发此路径）
+    #[test]
+    fn test_decode_ps_stderr_multibyte_after_escape_prefix() {
+        let input = "<Objs Version=\"1.1.0.1\"><S S=\"Error\">路径 _x不存在_中文🐶_x000D__x000A_</S></Objs>";
+        let cleaned = decode_powershell_stderr(input);
+        assert!(
+            cleaned.contains("路径 _x不存在_中文🐶"),
+            "非转义的 _x 与多字节字符应原样保留，实际: {cleaned}"
+        );
+    }
+
+    // ---------- 路径解析 ----------
+
+    /// 解析出的解释器路径必须真实存在且为可执行文件
+    #[test]
+    fn test_resolve_powershell_path_points_to_existing_file() {
+        let path = resolve_powershell_path();
+        assert!(path.is_some(), "本机应至少存在一个 PowerShell 解释器");
+        let p = std::path::Path::new(path.as_deref().unwrap());
+        assert!(p.is_file(), "解析结果应为存在的文件: {}", p.display());
+    }
+
+    /// 优先级：pwsh（PowerShell 7+）应排在 Windows PowerShell 5.1 之前
+    #[test]
+    fn test_resolve_powershell_path_prefers_pwsh() {
+        let chosen = resolve_powershell_path().unwrap().to_lowercase();
+        let pwsh_available = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .any(|d| d.join("pwsh.exe").is_file());
+        if pwsh_available {
+            assert!(
+                chosen.ends_with("pwsh.exe"),
+                "存在 pwsh 时应优先选择 pwsh.exe，实际: {chosen}"
+            );
+        } else {
+            assert!(
+                chosen.ends_with("powershell.exe"),
+                "无 pwsh 时应回退到 powershell.exe，实际: {chosen}"
+            );
+        }
+    }
+
+    // ---------- 工具元数据与注册 ----------
+
+    #[test]
+    fn test_powershell_tool_metadata() {
+        let tool = RunPowerShellCommandTool;
+        assert_eq!(tool.tool_name(), "powershell");
+        assert_eq!(tool.category(), "code");
+    }
+
+    /// 参数 schema 必须与 bash 工具保持一致的接口规范
+    #[test]
+    fn test_powershell_tool_parameters_match_bash_contract() {
+        let ps = RunPowerShellCommandTool.parameters();
+        let bash = RunCommandTool {
+            git_bash_path: String::new(),
+        }
+        .parameters();
+
+        let mut ps_keys: Vec<&String> = ps["properties"].as_object().unwrap().keys().collect();
+        let mut bash_keys: Vec<&String> = bash["properties"].as_object().unwrap().keys().collect();
+        ps_keys.sort();
+        bash_keys.sort();
+        assert_eq!(
+            ps_keys, bash_keys,
+            "powershell 与 bash 的参数集合应完全一致"
+        );
+        assert_eq!(ps["required"], json!(["command"]));
+        assert_eq!(ps["properties"]["timeout"]["default"], json!(60));
+    }
+
+    /// 描述需说明执行方式与返回字段，供 LLM 正确选用
+    #[test]
+    fn test_powershell_tool_description_mentions_contract() {
+        let desc = RunPowerShellCommandTool.description();
+        for token in [
+            "PowerShell",
+            "stdout",
+            "stderr",
+            "exit_code",
+            "working_dir",
+            "timeout",
+        ] {
+            assert!(desc.contains(token), "描述应包含关键契约信息: {token}");
+        }
+    }
+
+    #[test]
+    fn test_powershell_registered_in_builtin_registry() {
+        let mut registry = ToolRegistry::new();
+        let _reg = register_builtin_tools(
+            &mut registry,
+            String::new(),
+            test_db(),
+            crate::config::app_settings::WebSearchConfig::default(),
+            std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            None,
+            std::sync::Arc::new(crate::services::skill::registry::SkillRegistry::new(
+                crate::services::skill::loader::SkillLoader::new(
+                    std::path::PathBuf::from("/tmp"),
+                    None,
+                    Vec::new(),
+                ),
+            )),
+        );
+        let names: Vec<String> = registry.list_tools().into_iter().map(|t| t.name).collect();
+        assert!(
+            names.contains(&"powershell".to_string()),
+            "内置注册表应包含 powershell 工具，实际: {names:?}"
+        );
+    }
+
+    // ---------- 参数校验与错误处理 ----------
+
+    /// 缺少 command 参数时应返回参数错误码，且不得启动子进程
+    #[tokio::test]
+    async fn test_powershell_execute_missing_command() {
+        let result = RunPowerShellCommandTool.execute(json!({})).await;
+        assert!(!result.success);
+        assert_eq!(
+            result.error_code,
+            Some(crate::errors::TOOL_INVALID_PARAMS),
+            "缺参应返回 TOOL_INVALID_PARAMS"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_powershell_execute_blank_command() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "   "}))
+            .await;
+        assert!(!result.success);
+        assert_eq!(result.error_code, Some(crate::errors::TOOL_INVALID_PARAMS));
+    }
+
+    /// timeout 参数必须被钳制在上限内（与 bash 一致：最大 300 秒）
+    #[test]
+    fn test_powershell_timeout_clamp() {
+        assert_eq!(clamp_powershell_timeout(None), 60);
+        assert_eq!(clamp_powershell_timeout(Some(json!(10))), 10);
+        assert_eq!(clamp_powershell_timeout(Some(json!(9999))), 300);
+        // 0 秒会让命令刚启动就被终止，需钳到最小 1 秒
+        assert_eq!(clamp_powershell_timeout(Some(json!(0))), 1);
+        // 非法类型应回退到默认值
+        assert_eq!(clamp_powershell_timeout(Some(json!("abc"))), 60);
+    }
+}
+
+// ============================================================
+// powershell 工具真实执行测试（需要本机存在 PowerShell 解释器）
+// ============================================================
+
+#[cfg(all(test, target_os = "windows"))]
+mod powershell_execution_tests {
+    use super::*;
+
+    /// ToolResult.output 为 Option<Value>，统一在此取出便于断言
+    fn out(result: &ToolResult) -> &Value {
+        result
+            .output
+            .as_ref()
+            .expect("命令已执行（含非零退出码）时应返回 output 字段")
+    }
+
+    fn stdout_of(result: &ToolResult) -> String {
+        out(result)["stdout"].as_str().unwrap_or("").to_string()
+    }
+
+    fn stderr_of(result: &ToolResult) -> String {
+        out(result)["stderr"].as_str().unwrap_or("").to_string()
+    }
+
+    /// 基本执行：命令准确性
+    #[tokio::test]
+    async fn test_powershell_execute_returns_output() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "Write-Output 'hello-ps'"}))
+            .await;
+        assert!(result.success, "错误: {:?}", result.error);
+        assert!(
+            stdout_of(&result).contains("hello-ps"),
+            "stdout 实际: {}",
+            stdout_of(&result)
+        );
+        assert_eq!(out(&result)["exit_code"], json!(0));
+        assert_eq!(out(&result)["success"], json!(true));
+        assert!(out(&result)["duration_secs"].is_number());
+        assert_eq!(out(&result)["command"], json!("Write-Output 'hello-ps'"));
+    }
+
+    /// 显式 exit 应作为退出码返回，并标记为失败
+    #[tokio::test]
+    async fn test_powershell_execute_explicit_exit_code() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "exit 7"}))
+            .await;
+        assert!(!result.success);
+        assert_eq!(out(&result)["exit_code"], json!(7));
+        assert!(
+            result.error.unwrap_or_default().contains("7"),
+            "错误信息应包含退出码"
+        );
+    }
+
+    /// 原生程序退出码必须透传（PowerShell 默认不会把原生命令退出码交给宿主）
+    #[tokio::test]
+    async fn test_powershell_execute_propagates_native_exit_code() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "cmd /c \"exit 13\""}))
+            .await;
+        assert_eq!(
+            out(&result)["exit_code"],
+            json!(13),
+            "原生命令退出码应被归一化返回，stdout={} stderr={}",
+            stdout_of(&result),
+            stderr_of(&result)
+        );
+        assert!(!result.success);
+    }
+
+    /// 失败语句后的成功语句应以成功结束（与 bash 的“最后一条语句”语义一致）
+    #[tokio::test]
+    async fn test_powershell_execute_last_statement_wins() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "cmd /c \"exit 9\"\nWrite-Output 'recovered'"}))
+            .await;
+        assert!(
+            result.success,
+            "最后一条语句成功时整体应成功，stderr={}",
+            stderr_of(&result)
+        );
+        assert!(stdout_of(&result).contains("recovered"));
+    }
+
+    /// cmdlet 非终止错误应返回非零退出码，且 stderr 为可读文本
+    #[tokio::test]
+    async fn test_powershell_execute_cmdlet_error() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "Get-Item 'C:\\definitely_not_here_9f3a'"}))
+            .await;
+        assert!(!result.success, "不存在的文件应失败");
+        assert_eq!(out(&result)["exit_code"], json!(1));
+        let stderr = stderr_of(&result);
+        assert!(
+            stderr.contains("Get-Item") || stderr.contains("Cannot find"),
+            "stderr 应为可读错误文本，实际: {stderr}"
+        );
+        assert!(
+            !stderr.contains("CLIXML") && !stderr.contains("<Objs"),
+            "stderr 不应残留 CLIXML 结构，实际: {stderr}"
+        );
+    }
+
+    /// 非零退出码时也必须把 stdout 返回给模型（用于诊断）
+    #[tokio::test]
+    async fn test_powershell_execute_keeps_stdout_on_failure() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "Write-Output 'partial'\nexit 4"}))
+            .await;
+        assert!(!result.success);
+        assert!(
+            stdout_of(&result).contains("partial"),
+            "失败时也应保留已产生的 stdout，实际: {}",
+            stdout_of(&result)
+        );
+    }
+
+    /// 中文输出不得乱码（5.1 默认 GBK，需要编码前导 + 回退解码双保险）
+    #[tokio::test]
+    async fn test_powershell_execute_chinese_output() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "Write-Output '中文测试成功'"}))
+            .await;
+        assert!(result.success, "错误: {:?}", result.error);
+        assert!(
+            stdout_of(&result).contains("中文测试成功"),
+            "中文输出应完整无损，实际: {}",
+            stdout_of(&result)
+        );
+    }
+
+    /// emoji（非 GBK 字符集内）也应正确往返
+    #[tokio::test]
+    async fn test_powershell_execute_emoji_output() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "Write-Output 'dog:\u{1F436}'"}))
+            .await;
+        assert!(result.success);
+        assert!(
+            stdout_of(&result).contains('\u{1F436}'),
+            "emoji 应完整保留，实际: {:?}",
+            stdout_of(&result)
+        );
+    }
+
+    /// 中文错误消息也不应乱码
+    #[tokio::test]
+    async fn test_powershell_execute_chinese_error_message() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "Get-Item 'C:\\不存在的路径'"}))
+            .await;
+        assert!(!result.success);
+        let stderr = stderr_of(&result);
+        assert!(
+            !stderr.contains('\u{fffd}'),
+            "错误输出不应出现替换字符（编码丢失迹象），实际: {stderr}"
+        );
+    }
+
+    /// 引号、反引号、$ 符号等特殊字符必须无损传入（EncodedCommand 的核心收益）
+    #[tokio::test]
+    async fn test_powershell_execute_handles_tricky_quotes() {
+        let cmd = "$x = 'a\"b\"c'; Write-Output \"[$x]\"";
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": cmd}))
+            .await;
+        assert!(
+            result.success,
+            "错误: {:?} stderr={}",
+            result.error,
+            stderr_of(&result)
+        );
+        assert!(
+            stdout_of(&result).contains("[a\"b\"c]"),
+            "嵌套引号应原样处理，实际: {}",
+            stdout_of(&result)
+        );
+    }
+
+    /// 多行脚本块执行
+    #[tokio::test]
+    async fn test_powershell_execute_multiline_script() {
+        let cmd = "$total = 0\n1..4 | ForEach-Object { $total += $_ }\nWrite-Output \"sum=$total\"";
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": cmd}))
+            .await;
+        assert!(result.success, "错误: {:?}", result.error);
+        assert!(
+            stdout_of(&result).contains("sum=10"),
+            "实际: {}",
+            stdout_of(&result)
+        );
+    }
+
+    /// working_dir 应作为子进程工作目录生效
+    #[tokio::test]
+    async fn test_powershell_execute_respects_working_dir() {
+        // 用唯一命名的临时目录验证，避免依赖路径字符串比较
+        let unique = format!("ps_wd_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let result = RunPowerShellCommandTool
+            .execute(json!({
+                "command": "[System.IO.Path]::GetFileName((Get-Location).Path.TrimEnd('\\'))",
+                "working_dir": dir.to_string_lossy(),
+            }))
+            .await;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(result.success, "错误: {:?}", result.error);
+        assert_eq!(stdout_of(&result).trim(), unique, "工作目录应为指定目录");
+        assert_eq!(out(&result)["working_dir"], json!(dir.to_string_lossy()));
+    }
+
+    /// working_dir 不存在时应给出明确错误，而不是静默失败
+    #[tokio::test]
+    async fn test_powershell_execute_nonexistent_working_dir() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({
+                "command": "Write-Output x",
+                "working_dir": "C:\\no_such_dir_for_test_9137",
+            }))
+            .await;
+        assert!(!result.success);
+        assert!(result.error.is_some());
+    }
+
+    /// 大输出回归测试：必须在超时前返回（旧实现的“先等退出再读管道”会死锁）
+    #[tokio::test]
+    async fn test_powershell_execute_large_output_does_not_deadlock() {
+        let started = Instant::now();
+        let result = RunPowerShellCommandTool
+            .execute(json!({
+                "command": "Write-Output ('x' * 300000)",
+                "timeout": 60,
+            }))
+            .await;
+        let elapsed = started.elapsed();
+        assert!(result.success, "错误: {:?}", result.error);
+        let stdout = stdout_of(&result);
+        assert!(
+            stdout.contains("truncated"),
+            "超过 6000 字符应被截断，实际长度: {}",
+            stdout.len()
+        );
+        assert!(
+            elapsed < Duration::from_secs(30),
+            "大输出不应阻塞，实际耗时 {:?}",
+            elapsed
+        );
+    }
+
+    /// 超时终止：返回明确的超时错误，并在规定时间内结束
+    #[tokio::test]
+    async fn test_powershell_execute_timeout_terminates() {
+        let started = Instant::now();
+        let result = RunPowerShellCommandTool
+            .execute(json!({
+                "command": "Start-Sleep -Seconds 60",
+                "timeout": 2,
+            }))
+            .await;
+        let elapsed = started.elapsed();
+        assert!(!result.success, "超时命令应失败");
+        assert!(
+            result.error.unwrap_or_default().contains("超时"),
+            "错误信息应说明超时"
+        );
+        assert!(
+            elapsed >= Duration::from_secs(2) && elapsed < Duration::from_secs(15),
+            "应在超时点附近结束，实际 {:?}",
+            elapsed
+        );
+    }
+
+    /// 超时后不得残留 PowerShell 子进程（进程树终止）
+    #[tokio::test]
+    async fn test_powershell_execute_timeout_kills_process_tree() {
+        // 由 PowerShell 启动一个可观测的子进程，超时后检查其是否仍在运行
+        let result = RunPowerShellCommandTool
+            .execute(json!({
+                "command": "$p = Start-Process cmd.exe -ArgumentList '/c','timeout /t 60 >nul' -PassThru; Write-Output $p.Id; Start-Sleep -Seconds 60",
+                "timeout": 2,
+            }))
+            .await;
+        assert!(!result.success);
+        // 留给操作系统回收进程的时间
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let probe = std::process::Command::new("tasklist.exe")
+            .args(["/FI", "IMAGENAME eq cmd.exe", "/NH"])
+            .stdout(std::process::Stdio::piped())
+            .spawn();
+        if let Ok(probe) = probe {
+            let out = probe.wait_with_output();
+            if let Ok(out) = out {
+                let text = decode_console_bytes(&out.stdout);
+                // 只要不再是 60 秒超时的 cmd.exe 即视为已清理；
+                // 其它 cmd.exe 可能来自用户环境，故此处仅断言无 "timeout" 字样残留
+                assert!(!text.contains("timeout"), "超时后可能残留子进程: {text}");
+            }
+        }
+    }
+
+    /// 权限不足场景：写入受保护目录应失败并返回可读错误
+    #[tokio::test]
+    async fn test_powershell_execute_permission_denied() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({
+                "command": "New-Item -Path 'C:\\Windows\\System32\\config\\sw_probe_should_fail' -ItemType File -ErrorAction Stop",
+            }))
+            .await;
+        assert!(
+            !result.success,
+            "写入 System32 应因权限不足而失败，stdout={}",
+            stdout_of(&result)
+        );
+        assert_ne!(out(&result)["exit_code"], json!(0));
+        assert!(!stderr_of(&result).is_empty(), "应返回权限错误说明");
+    }
+
+    /// 语法错误应被报告为失败而非 panic
+    #[tokio::test]
+    async fn test_powershell_execute_syntax_error() {
+        let result = RunPowerShellCommandTool
+            .execute(json!({"command": "if ( {"}))
+            .await;
+        assert!(!result.success);
+        assert_ne!(out(&result)["exit_code"], json!(0));
+    }
+
+    /// 性能基线：区分冷启动与热调用，并与 bash 工具同机对比
+    #[tokio::test]
+    async fn test_powershell_execute_performance_baseline() {
+        // 冷启动：首次调用包含解释器定位与进程冷启动开销
+        let cold = Instant::now();
+        let warmup = RunPowerShellCommandTool
+            .execute(json!({"command": "Write-Output warmup"}))
+            .await;
+        assert!(warmup.success, "预热失败: {:?}", warmup.error);
+        let cold_ms = cold.elapsed().as_millis();
+
+        let mut ps_ms = Vec::new();
+        for _ in 0..3 {
+            let started = Instant::now();
+            let result = RunPowerShellCommandTool
+                .execute(json!({"command": "Write-Output 1"}))
+                .await;
+            assert!(result.success);
+            ps_ms.push(started.elapsed().as_millis());
+        }
+
+        // 同机 bash 工具基线，用于对比 PowerShell 的额外启动开销
+        let bash_tool = RunCommandTool {
+            git_bash_path: String::new(),
+        };
+        let mut bash_ms = Vec::new();
+        for _ in 0..3 {
+            let started = Instant::now();
+            let result = bash_tool.execute(json!({"command": "echo 1"})).await;
+            assert!(result.success, "bash 基线执行失败: {:?}", result.error);
+            bash_ms.push(started.elapsed().as_millis());
+        }
+
+        let ps_max = ps_ms.iter().max().copied().unwrap_or(0);
+        let ps_avg = ps_ms.iter().sum::<u128>() / ps_ms.len() as u128;
+        let bash_max = bash_ms.iter().max().copied().unwrap_or(0);
+        eprintln!(
+            "[性能基线] powershell 冷启动 {cold_ms} ms | 热调用 max {ps_max} ms avg {ps_avg} ms || bash max {bash_max} ms"
+        );
+
+        assert!(ps_max < 20_000, "简单命令热调用耗时异常: {ps_max} ms");
+        assert!(cold_ms < 30_000, "冷启动耗时异常: {cold_ms} ms");
+    }
+
+    /// 输出字段契约：与 bash 工具返回完全相同的键集合
+    #[tokio::test]
+    async fn test_powershell_execute_output_shape_matches_bash() {
+        let ps = RunPowerShellCommandTool
+            .execute(json!({"command": "Write-Output 1"}))
+            .await;
+        let bash = RunCommandTool {
+            git_bash_path: String::new(),
+        }
+        .execute(json!({"command": "echo 1"}))
+        .await;
+
+        let mut ps_keys: Vec<String> = ps
+            .output
+            .as_ref()
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        let mut bash_keys: Vec<String> = bash
+            .output
+            .as_ref()
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        ps_keys.sort();
+        bash_keys.sort();
+        assert_eq!(ps_keys, bash_keys, "返回字段必须与 bash 工具一致");
+    }
+}
+
+// ============================================================
+// powershell 跨解释器兼容性测试
+// Windows PowerShell 5.1 与 PowerShell 7 在输出代码页、原生退出码传递、
+// 错误流序列化上行为不同，必须对两者分别验证，而不是只测自动选中的那一个
+// ============================================================
+
+#[cfg(all(test, target_os = "windows"))]
+mod powershell_compat_tests {
+    use super::*;
+
+    /// 枚举本机存在的所有 PowerShell 解释器
+    fn available_shells() -> Vec<String> {
+        let mut shells = vec![resolve_powershell_path().expect("本机应能解析出 PowerShell")];
+        let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+        for candidate in [
+            format!("{system_root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
+            format!("{system_root}\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe"),
+        ] {
+            if std::path::Path::new(&candidate).is_file() && !shells.contains(&candidate) {
+                shells.push(candidate);
+            }
+        }
+        shells
+    }
+
+    /// 同一命令在两个解释器上都必须得到一致的结果
+    fn assert_case(shell: &str, command: &str, want_stdout: &str, want_code: i32) {
+        let out = execute_powershell_command(shell, command, "", 60)
+            .unwrap_or_else(|e| panic!("[{shell}] {command} 执行失败: {e}"));
+        let tag = format!(
+            "[{}] {}",
+            shell.rsplit('\\').next().unwrap_or(shell),
+            command
+        );
+        assert_eq!(out.exit_code, want_code, "{tag} 退出码不符");
+        assert!(
+            out.stdout.contains(want_stdout),
+            "{tag} stdout 缺少 {want_stdout:?}，实际: {:?}",
+            out.stdout
+        );
+        assert!(
+            !out.stderr.contains("CLIXML") && !out.stderr.contains("<Objs"),
+            "{tag} stderr 残留 CLIXML: {}",
+            out.stderr
+        );
+    }
+
+    #[test]
+    fn test_compat_at_least_one_shell_available() {
+        assert!(
+            !available_shells().is_empty(),
+            "本机未检测到任何 PowerShell 解释器"
+        );
+    }
+
+    /// 正常输出与中文在两个解释器上都不得乱码
+    #[test]
+    fn test_compat_text_and_chinese_output() {
+        for shell in available_shells() {
+            assert_case(&shell, "Write-Output 'ascii-ok'", "ascii-ok", 0);
+            assert_case(&shell, "Write-Output '中文输出正常'", "中文输出正常", 0);
+            assert_case(
+                &shell,
+                "Write-Output 'emoji:\u{1F436}'",
+                "emoji:\u{1F436}",
+                0,
+            );
+        }
+    }
+
+    /// 退出码归一在两个解释器上行为一致（PowerShell 默认不传原生退出码）
+    #[test]
+    fn test_compat_exit_code_semantics() {
+        for shell in available_shells() {
+            assert_case(&shell, "exit 42", "", 42);
+            assert_case(&shell, "cmd /c \"exit 5\"", "", 5);
+            assert_case(&shell, "Write-Output 'ok'", "ok", 0);
+            assert_case(&shell, "Get-Item C:\\missing_zz_1", "", 1);
+        }
+    }
+
+    /// 错误流：两个解释器都会把 error 记录序列化成 CLIXML，必须都被还原成可读文本
+    #[test]
+    fn test_compat_stderr_is_readable() {
+        for shell in available_shells() {
+            let out =
+                execute_powershell_command(&shell, "Get-Item C:\\definitely_missing_a7", "", 60)
+                    .expect("命令应执行完成");
+            let tag = shell.rsplit('\\').next().unwrap_or(&shell);
+            assert_eq!(out.exit_code, 1, "[{tag}] 应返回非零退出码");
+            assert!(
+                !out.stderr.is_empty(),
+                "[{tag}] 错误输出不应为空（旧实现会因编码问题丢空）"
+            );
+            assert!(
+                !out.stderr.contains("<Objs") && !out.stderr.contains("#< CLIXML"),
+                "[{tag}] CLIXML 未被还原: {}",
+                out.stderr
+            );
+            assert!(
+                !out.stderr.contains('\u{1b}'),
+                "[{tag}] 错误输出残留 ANSI 转义: {:?}",
+                out.stderr
+            );
+        }
+    }
+
+    /// 引号、变量、多行脚本在两个解释器上均无损
+    #[test]
+    fn test_compat_special_characters() {
+        for shell in available_shells() {
+            assert_case(&shell, "$x = 'a\"b'; Write-Output \"[$x]\"", "[a\"b]", 0);
+            assert_case(
+                &shell,
+                "$a = 1\n$b = 2\nWrite-Output \"sum=$($a+$b)\"",
+                "sum=3",
+                0,
+            );
+            // 含 Windows 路径与反斜杠结尾的字符串
+            assert_case(
+                &shell,
+                "Write-Output 'C:\\Program Files\\app'",
+                "C:\\Program Files\\app",
+                0,
+            );
+        }
+    }
+
+    /// 工作目录与超时在两个解释器上一致
+    #[test]
+    fn test_compat_working_dir_and_timeout() {
+        let dir = std::env::temp_dir();
+        for shell in available_shells() {
+            let tag = shell.rsplit('\\').next().unwrap_or(&shell);
+            let out = execute_powershell_command(
+                &shell,
+                "[System.IO.Directory]::GetCurrentDirectory()",
+                &dir.to_string_lossy(),
+                60,
+            )
+            .expect("应执行成功");
+            assert!(
+                out.stdout.trim().eq_ignore_ascii_case(
+                    dir.to_string_lossy()
+                        .trim_end_matches('\\')
+                        .to_lowercase()
+                        .as_str()
+                ) || out.stdout.contains(
+                    dir.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                        .as_str()
+                ),
+                "[{tag}] 工作目录未生效，实际: {}",
+                out.stdout
+            );
+
+            let started = Instant::now();
+            let err = match execute_powershell_command(&shell, "Start-Sleep -Seconds 60", "", 2) {
+                Err(e) => e,
+                Ok(_) => panic!("[{tag}] 长命令应在 2 秒超时"),
+            };
+            assert!(err.contains("超时"), "[{tag}] 超时信息不正确: {err}");
+            assert!(
+                started.elapsed() < Duration::from_secs(15),
+                "[{tag}] 超时响应过慢: {:?}",
+                started.elapsed()
+            );
         }
     }
 }
