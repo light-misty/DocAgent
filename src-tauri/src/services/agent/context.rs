@@ -1189,7 +1189,8 @@ When making changes to files, first understand the file's code conventions. Mimi
 - write: overwrite a file or append content (append=true)
 
 ### Code execution
-- bash: execute shell commands (compile, test, build, run scripts)
+- bash: execute shell commands via Git Bash (compile, test, build, run scripts; Unix syntax)
+- powershell: execute PowerShell commands (Windows cmdlets, services, registry, processes; PowerShell syntax)
 - write_script: write scripts to the system temp directory (then run via bash)
 
 ### File management
@@ -1244,8 +1245,11 @@ Example: Clients are marked as failed in the `connectToServer` function in src/s
 - Command timeout defaults to 60 seconds; adjust via the timeout parameter (max 300 seconds)
 - Output exceeding 6000 characters will be truncated automatically; for long output, redirect to a file and read it with the read tool
 - High-risk commands (rm -rf, format, etc.) require user confirmation
-- On Windows, commands run via Git Bash; use Unix-style commands
-- Use forward slashes (/) as path separators; Git Bash converts them automatically
+- Two shells are available and their syntax is not interchangeable:
+  - `bash`: runs Git Bash on Windows; use Unix syntax (grep/sed/awk, forward-slash paths). Best for scripts and portable tooling.
+  - `powershell`: runs PowerShell; use PowerShell syntax (Get-ChildItem, `$var`, `cmdlet -Parameter`). Required for Windows-native work: services, registry, event log, processes, CIM/WMI, scheduled tasks.
+- Do not write Unix syntax in the powershell tool or PowerShell syntax in the bash tool; if one shell lacks a capability, switch tools instead of forcing it
+- In Git Bash, use forward slashes (/) as path separators; Git Bash converts them automatically
 - Avoid platform-specific commands (e.g., xargs behaves differently in Windows Git Bash)"#
         )
     }
@@ -1812,9 +1816,34 @@ mod tests {
         assert!(strategy.contains("write"));
         // 代码执行
         assert!(strategy.contains("bash"));
+        assert!(strategy.contains("powershell"));
         assert!(strategy.contains("write_script"));
         // 任务管理
         assert!(strategy.contains("scratchpad"));
+    }
+
+    /// 测试脚本执行最佳实践段同时引导两个 shell 的选用
+    /// 若仅保留 "use Unix-style commands" 的旧引导，模型不会选择 powershell 工具
+    #[test]
+    fn test_script_best_practices_covers_both_shells() {
+        let env = EnvironmentInfo {
+            python_path: "python".to_string(),
+            git_bash_path: "C:\\Program Files\\Git\\bin\\bash.exe".to_string(),
+            os_info: "Windows".to_string(),
+            fonts_dir: String::new(),
+        };
+        let text = AgentContext::layer_script_best_practices(&env);
+        assert!(
+            text.contains("powershell"),
+            "应提及 powershell 工具，实际:\n{text}"
+        );
+        assert!(text.contains("PowerShell"), "应说明 PowerShell 语法");
+        assert!(text.contains("Git Bash"), "应说明 bash 走 Git Bash");
+        // 必须给出选用边界，而不是让模型以为 Windows 只能用 Unix 语法
+        assert!(
+            !text.contains("commands run via Git Bash; use Unix-style commands"),
+            "不应保留\u{201c}Windows 下只能用 Unix 风格命令\u{201d}的排他表述"
+        );
     }
 
     /// 测试加载历史消息
