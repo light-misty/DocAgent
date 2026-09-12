@@ -5,7 +5,7 @@ export type PermissionScope = 'global' | 'project' | 'session';
 export type PermissionAction = 'allow' | 'deny' | 'ask';
 export type PermissionType =
   | 'wildcard' | 'read' | 'edit' | 'glob' | 'grep' | 'list'
-  | 'bash' | 'write_script' | 'task' | 'skill'
+  | 'bash' | 'powershell' | 'write_script' | 'task' | 'skill'
   | 'web_fetch' | 'web_search' | 'external_directory' | 'doom_loop'
   | 'document' | 'question';
 

@@ -10,6 +10,7 @@ interface ToolNodeProps {
 /** 无路径工具 → i18n key 映射 */
 const toolDescriptions: Record<string, string> = {
   bash: 'toolBrief.runCommand',
+  powershell: 'toolBrief.runPowerShell',
   task: 'toolBrief.runTask',
   scratchpad: 'toolBrief.scratchpad',
   todowrite: 'toolBrief.todoWrite',
@@ -20,6 +21,12 @@ const toolDescriptions: Record<string, string> = {
   search: 'toolBrief.searchFiles',
   glob: 'toolBrief.globFiles',
   grep: 'toolBrief.grepFiles',
+};
+
+/** Shell 类工具 → 命令卡片的外壳标签与提示符 */
+const shellToolMeta: Record<string, { label: string; prompt: string }> = {
+  bash: { label: "Bash", prompt: "$ " },
+  powershell: { label: "PowerShell", prompt: "PS> " },
 };
 
 /** 工具输入参数预览：用实际输入内容替代静态 i18n 描述 */
@@ -53,10 +60,10 @@ export function ToolNode({ node }: ToolNodeProps) {
     ? errorText.slice(0, 150) + "..."
     : errorText;
 
-  // bash 工具的命令和结果展示
-  const isRunCommand = data.toolName === "bash";
-  const command = isRunCommand ? String(data.input?.command ?? "") : "";
-  const workingDir = isRunCommand ? String(data.input?.working_dir ?? "") : "";
+  // Shell 类工具（bash / powershell）的命令和结果展示
+  const shellMeta = shellToolMeta[data.toolName];
+  const command = shellMeta ? String(data.input?.command ?? "") : "";
+  const workingDir = shellMeta ? String(data.input?.working_dir ?? "") : "";
   // 执行结果：stdout/stderr/exit_code
   const result = data.result as { stdout?: string; stderr?: string; exit_code?: number } | undefined;
   const stdout = result?.stdout ?? "";
@@ -114,12 +121,12 @@ export function ToolNode({ node }: ToolNodeProps) {
           )}
         </div>
 
-        {/* bash 工具：合并卡片展示 Bash 标签、命令和执行结果 */}
-        {isRunCommand && command && (
+        {/* Shell 工具：合并卡片展示外壳标签、命令和执行结果 */}
+        {shellMeta && command && (
           <div className="wf-run-command-detail">
-            {/* 卡片头部：Bash 标签 + 工作区 */}
+            {/* 卡片头部：外壳标签 + 工作区 */}
             <div className="wf-run-command-header">
-              <span className="wf-run-command-bash-label">Bash</span>
+              <span className="wf-run-command-bash-label">{shellMeta.label}</span>
               {/* 工作目录（非默认时展示） */}
               {workingDir && (
                 <span className="wf-run-command-cwd" title={workingDir}>
@@ -129,7 +136,7 @@ export function ToolNode({ node }: ToolNodeProps) {
             </div>
             {/* 命令展示行 */}
             <code className="wf-run-command-code">
-              <span className="wf-run-command-prompt">$ </span>
+              <span className="wf-run-command-prompt">{shellMeta.prompt}</span>
               {command}
             </code>
             {/* 执行结果（完成后展示） */}
