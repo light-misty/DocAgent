@@ -94,6 +94,13 @@ impl PermissionRegistry {
                 "*".into(),
                 PermissionAction::Allow,
             ),
+            // PowerShell 命令执行:默认允许（危险命令由高风险确认兜底）
+            PermissionRule::new(
+                RuleScope::Global,
+                PermissionType::Powershell,
+                "*".into(),
+                PermissionAction::Allow,
+            ),
             // 脚本执行:默认允许
             PermissionRule::new(
                 RuleScope::Global,
@@ -246,6 +253,21 @@ mod tests {
         assert!(defaults
             .iter()
             .any(|r| r.pattern == "*.env" && r.action == PermissionAction::Deny));
+    }
+
+    /// powershell 与 bash 一样默认放行通配命令（危险命令由高风险确认兜底）
+    #[test]
+    fn test_builtin_defaults_allow_powershell() {
+        let registry = setup_registry();
+        let defaults = registry.default_rules();
+        assert!(
+            defaults
+                .iter()
+                .any(|r| r.permission_type == PermissionType::Powershell
+                    && r.pattern == "*"
+                    && r.action == PermissionAction::Allow),
+            "内置默认规则应包含 powershell 的 Allow 条目"
+        );
     }
 
     #[test]

@@ -39,7 +39,7 @@ fn extract_target(tool_name: &str, params: &serde_json::Value) -> String {
             .map(normalize_path_for_match)
             .unwrap_or_else(|| "*".to_string()),
         // 命令执行:提取 command 参数
-        "bash" | "write_script" => params
+        "bash" | "powershell" | "write_script" => params
             .get("command")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -404,5 +404,105 @@ mod tests {
             "d:/DeskTop/Samoyed-Work/src/main.rs",
             "d:/DeskTop/Samoyed-Work"
         ));
+    }
+
+    /// powershell 工具调用应映射到独立的 Powershell 权限类型，并以 command 作为匹配目标
+    #[test]
+    fn test_powershell_request_from_tool_call() {
+        let req = PermissionRequest::from_tool_call(
+            "powershell",
+            &serde_json::json!({"command": "Remove-Item C:\\tmp\\a -Recurse"}),
+        );
+        assert_eq!(req.permission_type, PermissionType::Powershell);
+        assert_eq!(req.target, "Remove-Item C:\\tmp\\a -Recurse");
+    }
+
+    /// powershell 缺少 command 参数时目标退化为通配符（不应 panic）
+    #[test]
+    fn test_powershell_request_without_command() {
+        let req =
+            PermissionRequest::from_tool_call("powershell", &serde_json::json!({"timeout": 5}));
+        assert_eq!(req.permission_type, PermissionType::Powershell);
+        assert_eq!(req.target, "*");
+    }
+
+    /// powershell 命中自己的规则，且不被 bash 的同名模式影响
+    #[test]
+    fn test_evaluate_powershell_command_pattern() {
+        let rules = vec![
+            make_rule(
+                RuleScope::Global,
+                PermissionType::Powershell,
+                "*",
+                PermissionAction::Allow,
+            ),
+            make_rule(
+                RuleScope::Global,
+                PermissionType::Powershell,
+                "Remove-Item *",
+                PermissionAction::Ask,
+            ),
+            make_rule(
+                RuleScope::Global,
+                PermissionType::Powershell,
+                "Remove-Item C:\\forbidden*",
+                PermissionAction::Deny,
+            ),
+        ];
+
+        // 普通命令 -> allow
+        let req1 = PermissionRequest::from_tool_call(
+            "powershell",
+            &serde_json::json!({"command": "Get-ChildItem"}),
+        );
+        assert_eq!(
+            PermissionEvaluator::evaluate(&req1, &rules).action,
+            PermissionAction::Allow
+        );
+
+        // 递归删除 -> ask
+        let req2 = PermissionRequest::from_tool_call(
+            "powershell",
+            &serde_json::json!({"command": "Remove-Item C:\\tmp\\a -Recurse"}),
+        );
+        assert_eq!(
+            PermissionEvaluator::evaluate(&req2, &rules).action,
+            PermissionAction::Ask
+        );
+
+        // 命中更具体的禁止规则（最后匹配优先）
+        let req3 = PermissionRequest::from_tool_call(
+            "powershell",
+            &serde_json::json!({"command": "Remove-Item C:\\forbidden\\x"}),
+        );
+        assert_eq!(
+            PermissionEvaluator::evaluate(&req3, &rules).action,
+            PermissionAction::Deny
+        );
+
+        // 仅针对 bash 的 Deny 规则不得命中 powershell 请求（无匹配时默认 Allow）
+        let bash_only = vec![make_rule(
+            RuleScope::Global,
+            PermissionType::Bash,
+            "Remove-Item *",
+            PermissionAction::Deny,
+        )];
+        assert_eq!(
+            PermissionEvaluator::evaluate(&req2, &bash_only).action,
+            PermissionAction::Allow,
+            "powershell 请求不应被 bash 类别的规则拒绝"
+        );
+        // 同一模式对 bash 请求确实生效
+        assert_eq!(
+            PermissionEvaluator::evaluate(
+                &PermissionRequest::from_tool_call(
+                    "bash",
+                    &serde_json::json!({"command": "Remove-Item C:\\tmp\\a"})
+                ),
+                &bash_only
+            )
+            .action,
+            PermissionAction::Deny
+        );
     }
 }

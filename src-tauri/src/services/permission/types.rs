@@ -58,6 +58,10 @@ pub enum PermissionType {
     List,
     /// 执行 Shell 命令:bash
     Bash,
+    /// 执行 PowerShell 命令:powershell
+    /// 注意:变体名写作 Powershell 而非 PowerShell,否则 serde 的 snake_case 会产出
+    /// "power_shell",与前端类型和 Display 三方不一致
+    Powershell,
     /// 写入并执行脚本:write_script
     WriteScript,
     /// 子 Agent 调用:task
@@ -90,6 +94,7 @@ impl fmt::Display for PermissionType {
             PermissionType::Grep => write!(f, "grep"),
             PermissionType::List => write!(f, "list"),
             PermissionType::Bash => write!(f, "bash"),
+            PermissionType::Powershell => write!(f, "powershell"),
             PermissionType::WriteScript => write!(f, "write_script"),
             PermissionType::Task => write!(f, "task"),
             PermissionType::Skill => write!(f, "skill"),
@@ -115,6 +120,7 @@ impl PermissionType {
             "grep" => Some(Self::Grep),
             "list" => Some(Self::List),
             "bash" => Some(Self::Bash),
+            "powershell" | "pwsh" | "power_shell" => Some(Self::Powershell),
             "write_script" => Some(Self::WriteScript),
             "task" => Some(Self::Task),
             "skill" => Some(Self::Skill),
@@ -139,6 +145,7 @@ impl PermissionType {
             "grep" | "search" => Self::Grep,
             "list" => Self::List,
             "bash" => Self::Bash,
+            "powershell" => Self::Powershell,
             "write_script" => Self::WriteScript,
             "task" => Self::Task,
             "webfetch" => Self::WebFetch,
@@ -163,6 +170,7 @@ impl PermissionType {
             self,
             PermissionType::Edit
                 | PermissionType::Bash
+                | PermissionType::Powershell
                 | PermissionType::WriteScript
                 | PermissionType::Task
                 | PermissionType::WebFetch
@@ -176,6 +184,7 @@ impl PermissionType {
         match self {
             PermissionType::Edit => "edit",
             PermissionType::Bash => "bash",
+            PermissionType::Powershell => "powershell",
             PermissionType::WriteScript => "write_script",
             PermissionType::Task => "task",
             PermissionType::WebFetch => "webfetch",
@@ -220,5 +229,66 @@ impl PermissionResponse {
             "reject" => Some(Self::Reject),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// powershell 权限类型必须在 Display / serde / from_str 三方保持同一字符串
+    /// 原因：规则写库用 Display（permission_repo.rs），读库用 from_str，
+    /// 前端与 HTTP 接口用 serde；任一方不一致会让用户规则静默退化为 Wildcard
+    #[test]
+    fn test_powershell_permission_type_name_consistency() {
+        assert_eq!(PermissionType::Powershell.to_string(), "powershell");
+        assert_eq!(
+            serde_json::to_string(&PermissionType::Powershell).unwrap(),
+            "\"powershell\""
+        );
+        assert_eq!(
+            serde_json::from_str::<PermissionType>("\"powershell\"").unwrap(),
+            PermissionType::Powershell
+        );
+        assert_eq!(
+            PermissionType::from_str("powershell"),
+            Some(PermissionType::Powershell)
+        );
+    }
+
+    /// 常见别名也应能解析，便于用户手写规则
+    #[test]
+    fn test_powershell_permission_type_aliases() {
+        assert_eq!(
+            PermissionType::from_str("pwsh"),
+            Some(PermissionType::Powershell)
+        );
+        assert_eq!(
+            PermissionType::from_str("PowerShell"),
+            Some(PermissionType::Powershell)
+        );
+    }
+
+    /// 写库(Display) -> 读库(from_str) 必须无损往返
+    #[test]
+    fn test_powershell_permission_type_roundtrip_through_db_string() {
+        let stored = PermissionType::Powershell.to_string();
+        assert_eq!(
+            PermissionType::from_str(&stored),
+            Some(PermissionType::Powershell)
+        );
+    }
+
+    #[test]
+    fn test_powershell_permission_type_mapping() {
+        assert_eq!(
+            PermissionType::from_tool_name("powershell"),
+            PermissionType::Powershell
+        );
+        // bash 与 powershell 是两个独立权限类别，不可互相串用
+        assert_eq!(PermissionType::from_tool_name("bash"), PermissionType::Bash);
+        // 执行命令属修改类操作，Plan 模式下应被拒绝
+        assert!(PermissionType::Powershell.is_modification());
+        assert_eq!(PermissionType::Powershell.category_name(), "powershell");
     }
 }
